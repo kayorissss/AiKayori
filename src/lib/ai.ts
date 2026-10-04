@@ -73,30 +73,6 @@ export async function saveKeys(keys: Partial<ApiKeysConfig>) {
   }
 }
 
-// Dynamically discover valid Gemini models for this specific API key
-export async function getAvailableGoogleModels(key: string): Promise<string[]> {
-  try {
-    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${key.trim()}`)
-    if (res.ok) {
-      const data = await res.json()
-      const models: any[] = data.models || []
-      const supported = models
-        .filter((m: any) => m.supportedGenerationMethods?.includes('generateContent'))
-        .map((m: any) => m.name.replace(/^models\//, ''))
-      if (supported.length > 0) return supported
-    }
-  } catch {}
-  return [
-    'gemini-1.5-flash-latest',
-    'gemini-1.5-flash',
-    'gemini-2.0-flash',
-    'gemini-1.5-flash-002',
-    'gemini-1.5-flash-001',
-    'gemini-1.5-pro-latest',
-    'gemini-1.5-pro'
-  ]
-}
-
 // Key verification tests
 export async function testGoogleKey(key: string): Promise<{ ok: boolean; message: string }> {
   const trimmed = key.trim()
@@ -120,17 +96,22 @@ export async function testGoogleKey(key: string): Promise<{ ok: boolean; message
     const available = (listData.models || [])
       .filter((m: any) => m.supportedGenerationMethods?.includes('generateContent'))
       .map((m: any) => m.name.replace(/^models\//, ''))
+      .filter((name: string) => !name.includes('vision') && !name.includes('embedding'))
 
-    const testModel =
-      available.find((m: string) => m.includes('1.5-flash') || m.includes('flash') || m.includes('2.0')) ||
-      available[0] ||
-      'gemini-1.5-flash-latest'
+    available.sort((a: string, b: string) => {
+      const getVer = (s: string) => {
+        const m = s.match(/(\d+\.?\d*)/)
+        return m ? parseFloat(m[1]) : 0
+      }
+      return getVer(b) - getVer(a)
+    })
 
-    // Perform a test completion with the discovered model
     const testEndpoints = [
-      `https://generativelanguage.googleapis.com/v1beta/models/${testModel}:generateContent?key=${trimmed}`,
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${trimmed}`,
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-002:generateContent?key=${trimmed}`
+      ...available.map((m: string) => `https://generativelanguage.googleapis.com/v1beta/models/${m}:generateContent?key=${trimmed}`),
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent?key=${trimmed}`,
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${trimmed}`,
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${trimmed}`,
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${trimmed}`
     ]
 
     for (const url of testEndpoints) {
@@ -146,9 +127,10 @@ export async function testGoogleKey(key: string): Promise<{ ok: boolean; message
         const data = await res.json()
         if (res.ok) {
           const text = data.candidates?.[0]?.content?.parts?.[0]?.text || 'ОК'
+          const mName = url.split('/models/')[1]?.split(':')[0] || 'gemini'
           return {
             ok: true,
-            message: `Подключено! Модель: ${testModel}. Ответ: ${text.trim()}`
+            message: `Подключено! Модель: ${mName}. Ответ: ${text.trim()}`
           }
         }
       } catch {}
@@ -156,7 +138,7 @@ export async function testGoogleKey(key: string): Promise<{ ok: boolean; message
 
     return {
       ok: true,
-      message: `Ключ подтвержден! Доступно моделей: ${available.length} (${testModel})`
+      message: `Ключ подтвержден! Доступно моделей: ${available.length}`
     }
   } catch (e: any) {
     return { ok: false, message: e.message || 'Ошибка сети' }
@@ -312,23 +294,27 @@ export async function callGoogleGemini(
   const contents = prepareGeminiContents(messages, imageBase64)
   const isPro = modelId.includes('pro')
 
-  // 1. Try to dynamically discover supported models via ListModels
-  let targetModel = ''
+  // 1. Dynamically discover supported models via ListModels
+  const discoveredModels: string[] = []
   try {
     const listRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${google}`)
     const listData = await listRes.json()
     if (listRes.ok && Array.isArray(listData.models)) {
-      const supported = listData.models.filter((m: any) => m.supportedGenerationMethods?.includes('generateContent'))
-      if (isPro) {
-        const found = supported.find((m: any) => m.name.includes('1.5-pro') || m.name.includes('pro'))
-        if (found) targetModel = found.name
-      } else {
-        const found = supported.find((m: any) => m.name.includes('1.5-flash') || m.name.includes('flash') || m.name.includes('2.0'))
-        if (found) targetModel = found.name
-      }
-      if (!targetModel && supported.length > 0) {
-        targetModel = supported[0].name
-      }
+      const supported = listData.models
+        .filter((m: any) => m.supportedGenerationMethods?.includes('generateContent'))
+        .map((m: any) => m.name.replace(/^models\//, ''))
+        .filter((name: string) => !name.includes('vision') && !name.includes('embedding') && !name.includes('aqa'))
+
+      // Sort models: higher version numbers first (e.g. 3.8, 2.5, 2.0, 1.5)
+      supported.sort((a: string, b: string) => {
+        const getVer = (s: string) => {
+          const m = s.match(/(\d+\.?\d*)/)
+          return m ? parseFloat(m[1]) : 0
+        }
+        return getVer(b) - getVer(a)
+      })
+
+      discoveredModels.push(...supported)
     } else if (listData.error?.message) {
       const msg = listData.error.message
       if (msg.includes('API key not valid')) {
@@ -347,12 +333,28 @@ export async function callGoogleGemini(
     }
   }
 
-  // Canonical candidates
-  const candidateNames = targetModel
-    ? [targetModel.replace(/^models\//, '')]
-    : isPro
-    ? ['gemini-1.5-pro-latest', 'gemini-1.5-pro', 'gemini-1.5-pro-002', 'gemini-1.5-pro-001']
-    : ['gemini-1.5-flash-latest', 'gemini-1.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash-002', 'gemini-1.5-flash-001']
+  // Priority queue of models to try
+  const queue: string[] = []
+
+  // Add discovered models according to isPro preference
+  if (isPro) {
+    queue.push(...discoveredModels.filter(m => m.includes('pro')))
+    queue.push(...discoveredModels.filter(m => !m.includes('pro')))
+  } else {
+    queue.push(...discoveredModels.filter(m => m.includes('flash')))
+    queue.push(...discoveredModels.filter(m => !m.includes('flash')))
+  }
+
+  // Also include modern canonical candidates (e.g. 3.8-flash, 2.5-flash, 2.0-flash, 1.5-flash)
+  const defaults = isPro
+    ? ['gemini-3.8-pro', 'gemini-2.5-pro', 'gemini-1.5-pro-latest', 'gemini-1.5-pro', 'gemini-2.0-flash']
+    : ['gemini-3.8-flash', 'gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash-latest', 'gemini-1.5-flash']
+
+  for (const def of defaults) {
+    if (!queue.includes(def)) {
+      queue.push(def)
+    }
+  }
 
   const body = {
     contents,
@@ -363,15 +365,20 @@ export async function callGoogleGemini(
     systemInstruction: {
       parts: [
         {
-          text: 'Ты Kayori — умный, дружелюбный и компетентный AI ассистент. Отвечай подробно, по делу, грамотно оформляй код в markdown с указанием языка. Помогай пользователю решать реальные задачи.'
+          text: 'Ты Kayori — умный, дружелюбный и компетентный AI ассистент. Отвечай всегда строго на русском языке, если только пользователь прямо не попросил писать на другом языке. Отвечай подробно, по делу, грамотно оформляй код в markdown с указанием языка. Помогай пользователю решать реальные задачи.'
         }
       ]
     }
   }
 
+  const tried = new Set<string>()
   let lastErrorMsg = ''
 
-  for (const model of candidateNames) {
+  while (queue.length > 0) {
+    const model = queue.shift()!
+    if (tried.has(model)) continue
+    tried.add(model)
+
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${google}`
     try {
       const res = await fetch(url, {
@@ -393,6 +400,18 @@ export async function callGoogleGemini(
         if (res.status === 429) {
           throw new Error('QUOTA_EXCEEDED: Превышен лимит запросов к Google Gemini API. Попробуйте через минуту.')
         }
+
+        // Check if Google returned a recommended model in the error message!
+        // e.g. "Please update your code to use models/gemini-3.8-flash for the latest features"
+        const recMatch = lastErrorMsg.match(/use\s+(?:models\/)?([a-zA-Z0-9._-]+)/i)
+        if (recMatch && recMatch[1]) {
+          const suggested = recMatch[1].replace(/^models\//, '')
+          if (!tried.has(suggested) && !queue.includes(suggested)) {
+            // Put recommended model to the very front to try next immediately!
+            queue.unshift(suggested)
+          }
+        }
+
         continue
       }
 
@@ -430,7 +449,7 @@ export async function callOpenAICompatible(
   formattedMessages.push({
     role: 'system',
     content:
-      'Ты Kayori — профессиональный, полезный AI ассистент. Отвечай информативно, логично и вежливо. Используй красивый Markdown с разметкой для кода.'
+      'Ты Kayori — профессиональный, полезный AI ассистент. Отвечай всегда строго на русском языке, если только пользователь прямо не попросил другой язык. Отвечай информативно, логично и вежливо. Используй красивый Markdown с разметкой для кода.'
   })
 
   for (let i = 0; i < messages.length; i++) {
@@ -521,11 +540,17 @@ export async function callCloudflare(modelId: string, messages: AiMessage[]): Pr
     headers['Authorization'] = `Bearer ${cfToken.trim()}`
   }
 
+  // Prepend Russian language instruction
+  const msgsWithInstruction = [
+    { role: 'system', content: 'Отвечай всегда строго на русском языке, если пользователь явно не попросил писать на другом языке.' },
+    ...messages.map(m => ({ role: m.role, content: m.content }))
+  ]
+
   const res = await fetch(`https://api.cloudflare.com/client/v4/accounts/${cfAccount.trim()}/ai/run/${modelId}`, {
     method: 'POST',
     headers,
     body: JSON.stringify({
-      messages: messages.map(m => ({ role: m.role, content: m.content })),
+      messages: msgsWithInstruction,
       max_tokens: 3072
     })
   })
@@ -542,6 +567,65 @@ export async function callCloudflare(modelId: string, messages: AiMessage[]): Pr
     throw new Error('Cloudflare AI вернул пустой результат.')
   }
   return text
+}
+
+// Instant Translation to Russian
+export async function translateTextToRussian(text: string): Promise<string> {
+  const trimmed = text.trim()
+  if (!trimmed) return ''
+
+  // 1. Try Google Translate public API (instant, preserves layout)
+  try {
+    const chunks: string[] = []
+    let remaining = trimmed
+    while (remaining.length > 0) {
+      if (remaining.length <= 1400) {
+        chunks.push(remaining)
+        break
+      }
+      let splitIdx = remaining.lastIndexOf('\n', 1400)
+      if (splitIdx === -1) splitIdx = remaining.lastIndexOf('. ', 1400)
+      if (splitIdx === -1) splitIdx = 1400
+      chunks.push(remaining.slice(0, splitIdx + 1))
+      remaining = remaining.slice(splitIdx + 1)
+    }
+
+    const translatedParts: string[] = []
+    for (const chunk of chunks) {
+      const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=ru&dt=t&q=${encodeURIComponent(chunk)}`
+      const res = await fetch(url)
+      if (res.ok) {
+        const data = await res.json()
+        if (Array.isArray(data[0])) {
+          const part = data[0].map((item: any) => item[0]).join('')
+          translatedParts.push(part)
+        }
+      }
+    }
+    const fullTranslation = translatedParts.join('')
+    if (fullTranslation && fullTranslation.trim().length > 0) {
+      return fullTranslation
+    }
+  } catch {}
+
+  // 2. Fallback to active AI model if keys exist
+  try {
+    const keys = await getKeys()
+    const prompt = `Переведи следующий текст на естественный русский язык. Сохрани все заголовки, списки, ссылки и блоки кода в markdown без изменений. Выведи ТОЛЬКО готовый русский перевод без пояснений и вступительных слов:\n\n${trimmed}`
+
+    if (keys.openaiKey) {
+      const res = await callOpenAICompatible([{ role: 'user', content: prompt }])
+      if (res.text) return res.text
+    } else if (keys.google) {
+      const res = await callGoogleGemini('gemini-3.8-flash', [{ role: 'user', content: prompt }])
+      if (res) return res
+    } else if (keys.cfAccount && keys.cfToken) {
+      const res = await callCloudflare('@cf/meta/llama-3.1-8b-instruct', [{ role: 'user', content: prompt }])
+      if (res) return res
+    }
+  } catch {}
+
+  throw new Error('Не удалось перевести текст. Проверьте интернет-соединение.')
 }
 
 export async function chatCompletion(
@@ -592,13 +676,12 @@ export async function chatCompletion(
         const cfModelId = MODELS[modelKey].id
         text = await callCloudflare(cfModelId, msgs)
       } catch (cfErr: any) {
-        // If Cloudflare fails (e.g. invalid cfk_ or account), fallback to other configured keys
         if (keys.openaiKey) {
           const res = await callOpenAICompatible(messages, opts)
           text = `> *(Cloudflare: ${cfErr.message}. Ответ через ${keys.openaiModel})*\n\n${res.text}`
           reasoning = res.reasoning
         } else if (keys.google) {
-          text = await callGoogleGemini('gemini-1.5-flash-latest', msgs, opts?.imageBase64)
+          text = await callGoogleGemini('gemini-3.8-flash', msgs, opts?.imageBase64)
         } else {
           throw cfErr
         }
@@ -608,7 +691,7 @@ export async function chatCompletion(
       text = res.text
       reasoning = res.reasoning
     } else if (keys.google) {
-      text = await callGoogleGemini('gemini-1.5-flash-latest', msgs, opts?.imageBase64)
+      text = await callGoogleGemini('gemini-3.8-flash', msgs, opts?.imageBase64)
     } else {
       throw new Error(
         'MISSING_CREDENTIALS: Не указан API ключ. Откройте Настройки (вкладка «API Ключи») и настройте ключ Google Gemini, OpenAI/Groq или Cloudflare.'
