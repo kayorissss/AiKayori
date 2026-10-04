@@ -169,7 +169,7 @@ export default function MessageBubble({ message, theme = 'dark' }: { message: Ch
 
             <div className="whitespace-pre-wrap select-text font-medium">{message.content}</div>
 
-            <div className="flex justify-end items-center gap-2 mt-1.5 pt-1 border-t border-current/10">
+            <div className="flex justify-end items-center gap-2 mt-1">
               <span className="text-[10px] font-mono opacity-60">{timeStr}</span>
             </div>
           </div>
@@ -333,8 +333,8 @@ export default function MessageBubble({ message, theme = 'dark' }: { message: Ch
                 </div>
               )}
 
-              {/* Dedicated Timestamp Footer (no overlap!) */}
-              <div className="flex justify-end items-center mt-2 pt-1 border-t border-current/10">
+              {/* Dedicated Timestamp Footer (no border/line) */}
+              <div className="flex justify-end items-center mt-1.5">
                 <span className={`text-[10px] font-mono select-none ${isLight ? 'text-[#9CA3AF]' : 'text-white/30'}`}>
                   {timeStr}
                 </span>

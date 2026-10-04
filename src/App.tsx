@@ -57,6 +57,20 @@ export default function App() {
     window.addEventListener('open-settings' as any, onOpenSettings)
     window.addEventListener('open-image' as any, onOpenImage)
 
+    // Open all links externally in system browser
+    const onLinkClick = (e: MouseEvent) => {
+      const target = (e.target as HTMLElement).closest('a')
+      if (target && target.href && (target.href.startsWith('http://') || target.href.startsWith('https://'))) {
+        e.preventDefault()
+        if ((window as any).electronAPI?.openExternal) {
+          (window as any).electronAPI.openExternal(target.href)
+        } else {
+          window.open(target.href, '_blank', 'noopener,noreferrer')
+        }
+      }
+    }
+    document.addEventListener('click', onLinkClick)
+
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'F11') {
         e.preventDefault()
@@ -81,6 +95,7 @@ export default function App() {
       window.removeEventListener('open-account' as any, onOpenAccount)
       window.removeEventListener('open-settings' as any, onOpenSettings)
       window.removeEventListener('open-image' as any, onOpenImage)
+      document.removeEventListener('click', onLinkClick)
     }
   }, [settingsOpen, accountOpen])
 

@@ -73,6 +73,7 @@ export default function SettingsModal({ open, onClose, theme = 'dark', onToggleT
   const [googleKey, setGoogleKey] = useState('')
   const [cfAccount, setCfAccount] = useState('')
   const [cfToken, setCfToken] = useState('')
+  const [cfEmail, setCfEmail] = useState('')
   const [openaiKey, setOpenaiKey] = useState('')
   const [openaiUrl, setOpenaiUrl] = useState('https://api.openai.com/v1')
   const [openaiModel, setOpenaiModel] = useState('gpt-4o-mini')
@@ -89,6 +90,7 @@ export default function SettingsModal({ open, onClose, theme = 'dark', onToggleT
         setGoogleKey(keys.google)
         setCfAccount(keys.cfAccount)
         setCfToken(keys.cfToken)
+        setCfEmail(keys.cfEmail || '')
         setOpenaiKey(keys.openaiKey)
         setOpenaiUrl(keys.openaiUrl || 'https://api.openai.com/v1')
         setOpenaiModel(keys.openaiModel || 'gpt-4o-mini')
@@ -120,6 +122,7 @@ export default function SettingsModal({ open, onClose, theme = 'dark', onToggleT
       google: googleKey,
       cfAccount,
       cfToken,
+      cfEmail,
       openaiKey,
       openaiUrl,
       openaiModel
@@ -145,7 +148,7 @@ export default function SettingsModal({ open, onClose, theme = 'dark', onToggleT
   const handleTestCloudflare = async () => {
     setCfTestStatus({ loading: true, msg: 'Проверка...' })
     await handleSaveApiKeys()
-    const res = await testCloudflareKey(cfAccount, cfToken)
+    const res = await testCloudflareKey(cfAccount, cfToken, cfEmail)
     setCfTestStatus({ loading: false, msg: res.message, ok: res.ok })
   }
 
@@ -528,28 +531,54 @@ export default function SettingsModal({ open, onClose, theme = 'dark', onToggleT
                           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                             <div>
                               <label className={`block text-[11px] font-bold uppercase tracking-wider mb-1.5 ${subtextColor}`}>
-                                Account ID
+                                Account ID (32 символа)
                               </label>
                               <input
                                 type="text"
                                 value={cfAccount}
                                 onChange={e => setCfAccount(e.target.value)}
-                                placeholder="Ваш Account ID из панели CF"
+                                placeholder="например: 25144798dda3bc70566f4b56b5497d9f"
                                 className={`w-full ${inputBg} border ${inputBorder} rounded-[12px] px-3.5 py-2.5 text-[12px] font-mono focus:border-[#F38020] transition`}
                               />
                             </div>
                             <div>
                               <label className={`block text-[11px] font-bold uppercase tracking-wider mb-1.5 ${subtextColor}`}>
-                                API Token
+                                API Token или Global Key
                               </label>
                               <input
                                 type="password"
                                 value={cfToken}
                                 onChange={e => setCfToken(e.target.value)}
-                                placeholder="Ваш Workers AI токен"
+                                placeholder="cfut_... или cfk_..."
                                 className={`w-full ${inputBg} border ${inputBorder} rounded-[12px] px-3.5 py-2.5 text-[12px] font-mono focus:border-[#F38020] transition`}
                               />
                             </div>
+                          </div>
+
+                          {/* Email input if user pasted Global API Key cfk_ */}
+                          <div>
+                            <div className="flex items-center justify-between mb-1.5">
+                              <label className={`text-[11px] font-bold uppercase tracking-wider ${subtextColor}`}>
+                                Cloudflare Email {cfToken.startsWith('cfk_') && <span className="text-amber-500 font-bold">(Обязательно для ключей cfk_)</span>}
+                              </label>
+                              {cfToken.startsWith('cfk_') && (
+                                <span className="text-[10px] text-amber-500 bg-amber-500/10 px-2 py-0.5 rounded-full font-semibold">
+                                  Обнаружен Global API Key (cfk_...)
+                                </span>
+                              )}
+                            </div>
+                            <input
+                              type="email"
+                              value={cfEmail}
+                              onChange={e => setCfEmail(e.target.value)}
+                              placeholder="email@example.com (почта вашего аккаунта Cloudflare)"
+                              className={`w-full ${inputBg} border ${inputBorder} rounded-[12px] px-3.5 py-2.5 text-[12px] font-mono focus:border-[#F38020] transition`}
+                            />
+                            {cfToken.startsWith('cfk_') && !cfEmail.trim() && (
+                              <div className="text-[11px] text-amber-500 mt-1">
+                                ⚠️ Ключ <b>cfk_...</b> требует ваш Email от Cloudflare. Введите email, под которым зарегистрирован ваш Cloudflare.
+                              </div>
+                            )}
                           </div>
 
                           <div className="flex items-center justify-between pt-1">

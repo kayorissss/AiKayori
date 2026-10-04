@@ -17,5 +17,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
   onOpenSettings: (cb) => {
     ipcRenderer.on('open-settings', () => cb())
+  },
+  openExternal: (url) => {
+    ipcRenderer.send('open-external', url)
   }
 })

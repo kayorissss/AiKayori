@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog, Tray, Menu } = require('electron')
+const { app, BrowserWindow, ipcMain, dialog, Tray, Menu, shell } = require('electron')
 const path = require('path')
 
 let mainWindow = null
@@ -23,6 +23,21 @@ function createWindow() {
       contextIsolation: true,
     },
     show: false,
+  })
+
+  // Open all external links in system default browser (Chrome, Firefox, Edge, etc.)
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    if (url.startsWith('http:') || url.startsWith('https:')) {
+      shell.openExternal(url)
+    }
+    return { action: 'deny' }
+  })
+
+  mainWindow.webContents.on('will-navigate', (event, url) => {
+    if (url !== mainWindow.webContents.getURL() && (url.startsWith('http:') || url.startsWith('https:'))) {
+      event.preventDefault()
+      shell.openExternal(url)
+    }
   })
 
   mainWindow.once('ready-to-show', () => {
@@ -122,6 +137,11 @@ ipcMain.on('window-quit', () => {
 })
 ipcMain.on('window-hide', () => mainWindow?.hide())
 ipcMain.on('window-show', () => { mainWindow?.show(); mainWindow?.focus() })
+ipcMain.on('open-external', (_, url) => {
+  if (url && (url.startsWith('http:') || url.startsWith('https:'))) {
+    shell.openExternal(url)
+  }
+})
 
 ipcMain.handle('check-updates', async () => {
   return {

@@ -6,6 +6,7 @@ export interface ApiKeysConfig {
   google: string
   cfAccount: string
   cfToken: string
+  cfEmail: string
   openaiKey: string
   openaiUrl: string
   openaiModel: string
@@ -20,6 +21,7 @@ export async function getKeys(): Promise<ApiKeysConfig> {
   const customGoogle = (await getSetting<string>('custom-google-key')) || localStorage.getItem('custom-google-key') || ''
   const customCfToken = (await getSetting<string>('custom-cf-token')) || localStorage.getItem('custom-cf-token') || ''
   const customCfAccount = (await getSetting<string>('custom-cf-account')) || localStorage.getItem('custom-cf-account') || ''
+  const customCfEmail = (await getSetting<string>('custom-cf-email')) || localStorage.getItem('custom-cf-email') || ''
   const customOpenaiKey = (await getSetting<string>('custom-openai-key')) || localStorage.getItem('custom-openai-key') || ''
   const customOpenaiUrl = (await getSetting<string>('custom-openai-url')) || localStorage.getItem('custom-openai-url') || 'https://api.openai.com/v1'
   const customOpenaiModel = (await getSetting<string>('custom-openai-model')) || localStorage.getItem('custom-openai-model') || 'gpt-4o-mini'
@@ -33,6 +35,7 @@ export async function getKeys(): Promise<ApiKeysConfig> {
     google: customGoogle || envGoogle,
     cfAccount: customCfAccount || envCfAccount,
     cfToken: customCfToken || envCfToken,
+    cfEmail: customCfEmail,
     openaiKey: customOpenaiKey || envOpenaiKey,
     openaiUrl: customOpenaiUrl.replace(/\/+$/, ''),
     openaiModel: customOpenaiModel
@@ -51,6 +54,10 @@ export async function saveKeys(keys: Partial<ApiKeysConfig>) {
   if (keys.cfToken !== undefined) {
     await saveSetting('custom-cf-token', keys.cfToken.trim())
     localStorage.setItem('custom-cf-token', keys.cfToken.trim())
+  }
+  if (keys.cfEmail !== undefined) {
+    await saveSetting('custom-cf-email', keys.cfEmail.trim())
+    localStorage.setItem('custom-cf-email', keys.cfEmail.trim())
   }
   if (keys.openaiKey !== undefined) {
     await saveSetting('custom-openai-key', keys.openaiKey.trim())
@@ -96,12 +103,17 @@ export async function testGoogleKey(key: string): Promise<{ ok: boolean; message
   if (!trimmed) return { ok: false, message: 'Ключ пустой' }
 
   try {
-    // 1. First test using list models (validates key validity and gets supported model list)
     const listRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${trimmed}`)
     const listData = await listRes.json()
 
     if (!listRes.ok) {
       const err = listData.error?.message || `Ошибка HTTP ${listRes.status}`
+      if (err.includes('User location is not supported')) {
+        return {
+          ok: false,
+          message: 'Google блокирует запросы из вашего региона (User location is not supported). Включите VPN или используйте вкладку Groq/OpenAI.'
+        }
+      }
       return { ok: false, message: err }
     }
 
@@ -114,11 +126,10 @@ export async function testGoogleKey(key: string): Promise<{ ok: boolean; message
       available[0] ||
       'gemini-1.5-flash-latest'
 
-    // 2. Perform a test completion with the discovered model
+    // Perform a test completion with the discovered model
     const testEndpoints = [
       `https://generativelanguage.googleapis.com/v1beta/models/${testModel}:generateContent?key=${trimmed}`,
       `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${trimmed}`,
-      `https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=${trimmed}`,
       `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-002:generateContent?key=${trimmed}`
     ]
 
@@ -185,17 +196,34 @@ export async function testOpenAIKey(
   }
 }
 
-export async function testCloudflareKey(account: string, token: string): Promise<{ ok: boolean; message: string }> {
+export async function testCloudflareKey(account: string, token: string, email?: string): Promise<{ ok: boolean; message: string }> {
   const acc = account.trim()
   const tok = token.trim()
+  const em = email?.trim() || ''
+
   if (!acc || !tok) return { ok: false, message: 'Укажите Account ID и API Token' }
+
+  if (tok.startsWith('cfk_') && !em) {
+    return {
+      ok: false,
+      message: 'Ключ cfk_ — это Global API Key. Cloudflare требует указать ваш Email аккаунта (введите Email ниже) или использовать API Token.'
+    }
+  }
+
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json'
+  }
+  if (tok.startsWith('cfk_')) {
+    headers['X-Auth-Key'] = tok
+    headers['X-Auth-Email'] = em
+  } else {
+    headers['Authorization'] = `Bearer ${tok}`
+  }
+
   try {
     const res = await fetch(`https://api.cloudflare.com/client/v4/accounts/${acc}/ai/run/@cf/meta/llama-3.1-8b-instruct`, {
       method: 'POST',
-      headers: {
-        Authorization: `Bearer ${tok}`,
-        'Content-Type': 'application/json'
-      },
+      headers,
       body: JSON.stringify({
         messages: [{ role: 'user', content: 'Say OK' }],
         max_tokens: 10
@@ -203,11 +231,11 @@ export async function testCloudflareKey(account: string, token: string): Promise
     })
     const data = await res.json()
     if (!res.ok || data.success === false) {
-      const err = data.errors?.[0]?.message || data.error || `Ошибка HTTP ${res.status}`
+      const err = data.errors?.[0]?.message || data.error || `HTTP ${res.status}`
       return { ok: false, message: err }
     }
     const text = data.result?.response || 'Подключено'
-    return { ok: true, message: `Успешно! Ответ: ${String(text).slice(0, 50)}` }
+    return { ok: true, message: `Успешно! Ответ: ${String(text).slice(0, 40)}` }
   } catch (e: any) {
     return { ok: false, message: e.message || 'Ошибка сети' }
   }
@@ -277,23 +305,54 @@ export async function callGoogleGemini(
   const { google } = await getKeys()
   if (!google) {
     throw new Error(
-      'MISSING_GOOGLE_KEY: Не указан API ключ Google Gemini. Перейдите в «Настройки» → «API Ключи» и вставьте ваш ключ Google AI Studio (он бесплатный: https://aistudio.google.com/app/apikey).'
+      'MISSING_GOOGLE_KEY: Не указан API ключ Google Gemini. Перейдите в «Настройки» → «API Ключи» и вставьте ваш ключ Google AI Studio (бесплатно: https://aistudio.google.com/app/apikey).'
     )
   }
 
   const contents = prepareGeminiContents(messages, imageBase64)
   const isPro = modelId.includes('pro')
 
-  // List of fallback candidates so 404 never occurs
-  const candidateModels = isPro
-    ? ['gemini-1.5-pro-latest', 'gemini-1.5-pro', 'gemini-1.5-pro-002', 'gemini-1.5-pro-001', 'gemini-pro']
-    : ['gemini-1.5-flash-latest', 'gemini-1.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash-002', 'gemini-1.5-flash-001', 'gemini-pro']
-
-  const candidateUrls: string[] = []
-  for (const m of candidateModels) {
-    candidateUrls.push(`https://generativelanguage.googleapis.com/v1beta/models/${m}:generateContent?key=${google}`)
-    candidateUrls.push(`https://generativelanguage.googleapis.com/v1/models/${m}:generateContent?key=${google}`)
+  // 1. Try to dynamically discover supported models via ListModels
+  let targetModel = ''
+  try {
+    const listRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${google}`)
+    const listData = await listRes.json()
+    if (listRes.ok && Array.isArray(listData.models)) {
+      const supported = listData.models.filter((m: any) => m.supportedGenerationMethods?.includes('generateContent'))
+      if (isPro) {
+        const found = supported.find((m: any) => m.name.includes('1.5-pro') || m.name.includes('pro'))
+        if (found) targetModel = found.name
+      } else {
+        const found = supported.find((m: any) => m.name.includes('1.5-flash') || m.name.includes('flash') || m.name.includes('2.0'))
+        if (found) targetModel = found.name
+      }
+      if (!targetModel && supported.length > 0) {
+        targetModel = supported[0].name
+      }
+    } else if (listData.error?.message) {
+      const msg = listData.error.message
+      if (msg.includes('API key not valid')) {
+        throw new Error('INVALID_GOOGLE_KEY: Введённый API ключ Google Gemini недействителен. Проверьте ключ в Настройках.')
+      }
+      if (msg.includes('User location is not supported')) {
+        throw new Error('LOCATION_BLOCKED: Google блокирует запросы из вашего региона (User location is not supported). Включите VPN для работы с Gemini, либо используйте вкладку Groq / OpenAI (она работает без VPN).')
+      }
+      if (listRes.status === 429) {
+        throw new Error('QUOTA_EXCEEDED: Превышен лимит запросов к Google Gemini API. Попробуйте через минуту.')
+      }
+    }
+  } catch (e: any) {
+    if (e.message?.startsWith('INVALID_GOOGLE_KEY') || e.message?.startsWith('LOCATION_BLOCKED') || e.message?.startsWith('QUOTA_EXCEEDED')) {
+      throw e
+    }
   }
+
+  // Canonical candidates
+  const candidateNames = targetModel
+    ? [targetModel.replace(/^models\//, '')]
+    : isPro
+    ? ['gemini-1.5-pro-latest', 'gemini-1.5-pro', 'gemini-1.5-pro-002', 'gemini-1.5-pro-001']
+    : ['gemini-1.5-flash-latest', 'gemini-1.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash-002', 'gemini-1.5-flash-001']
 
   const body = {
     contents,
@@ -312,7 +371,8 @@ export async function callGoogleGemini(
 
   let lastErrorMsg = ''
 
-  for (const url of candidateUrls) {
+  for (const model of candidateNames) {
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${google}`
     try {
       const res = await fetch(url, {
         method: 'POST',
@@ -324,9 +384,8 @@ export async function callGoogleGemini(
 
       if (!res.ok) {
         lastErrorMsg = data.error?.message || `HTTP ${res.status}`
-        // If 404 (model not found for this version), try next candidate URL
-        if (res.status === 404 || lastErrorMsg.includes('not found')) {
-          continue
+        if (lastErrorMsg.includes('User location is not supported')) {
+          throw new Error('LOCATION_BLOCKED: Google блокирует запросы из вашего региона (User location is not supported). Включите VPN для работы с Gemini, либо используйте вкладку Groq / OpenAI (она работает без блокировок).')
         }
         if (res.status === 400 && lastErrorMsg.includes('API key not valid')) {
           throw new Error('INVALID_GOOGLE_KEY: Введённый API ключ Google Gemini недействителен. Проверьте ключ в Настройках.')
@@ -334,7 +393,7 @@ export async function callGoogleGemini(
         if (res.status === 429) {
           throw new Error('QUOTA_EXCEEDED: Превышен лимит запросов к Google Gemini API. Попробуйте через минуту.')
         }
-        throw new Error(`Ошибка Google Gemini: ${lastErrorMsg}`)
+        continue
       }
 
       const candidate = data.candidates?.[0]
@@ -345,14 +404,14 @@ export async function callGoogleGemini(
       const text = candidate?.content?.parts?.[0]?.text
       if (text) return text
     } catch (e: any) {
-      if (e.message?.startsWith('INVALID_GOOGLE_KEY') || e.message?.startsWith('QUOTA_EXCEEDED')) {
+      if (e.message?.startsWith('LOCATION_BLOCKED') || e.message?.startsWith('INVALID_GOOGLE_KEY') || e.message?.startsWith('QUOTA_EXCEEDED')) {
         throw e
       }
       lastErrorMsg = e.message || lastErrorMsg
     }
   }
 
-  throw new Error(`Не удалось получить ответ от Google Gemini: ${lastErrorMsg}`)
+  throw new Error(`Google Gemini: ${lastErrorMsg || 'Не удалось получить ответ'}`)
 }
 
 export async function callOpenAICompatible(
@@ -439,19 +498,32 @@ export async function callOpenAICompatible(
 }
 
 export async function callCloudflare(modelId: string, messages: AiMessage[]): Promise<string> {
-  const { cfAccount, cfToken } = await getKeys()
+  const { cfAccount, cfToken, cfEmail } = await getKeys()
   if (!cfAccount || !cfToken) {
     throw new Error(
       'MISSING_CLOUDFLARE_CREDENTIALS: Для работы моделей Cloudflare укажите Account ID и API Token в Настройках, либо используйте Google Gemini или OpenAI/Groq.'
     )
   }
 
-  const res = await fetch(`https://api.cloudflare.com/client/v4/accounts/${cfAccount}/ai/run/${modelId}`, {
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json'
+  }
+
+  if (cfToken.startsWith('cfk_')) {
+    if (!cfEmail) {
+      throw new Error(
+        'CLOUDFLARE_GLOBAL_KEY: Ключ начинается на "cfk_" — это Global API Key. Для него Cloudflare требует указать Email вашего аккаунта (введите Email в Настройках в карточке Cloudflare), либо создать API Token в dash.cloudflare.com/profile/api-tokens.'
+      )
+    }
+    headers['X-Auth-Key'] = cfToken.trim()
+    headers['X-Auth-Email'] = cfEmail.trim()
+  } else {
+    headers['Authorization'] = `Bearer ${cfToken.trim()}`
+  }
+
+  const res = await fetch(`https://api.cloudflare.com/client/v4/accounts/${cfAccount.trim()}/ai/run/${modelId}`, {
     method: 'POST',
-    headers: {
-      Authorization: `Bearer ${cfToken}`,
-      'Content-Type': 'application/json'
-    },
+    headers,
     body: JSON.stringify({
       messages: messages.map(m => ({ role: m.role, content: m.content })),
       max_tokens: 3072
@@ -514,15 +586,33 @@ export async function chatCompletion(
     text = res.text
     reasoning = res.reasoning
   } else {
-    if ((!keys.cfAccount || !keys.cfToken) && keys.google) {
-      text = await callGoogleGemini('gemini-1.5-flash-latest', msgs, opts?.imageBase64)
-    } else if ((!keys.cfAccount || !keys.cfToken) && keys.openaiKey) {
+    // Cloudflare models
+    if (keys.cfAccount && keys.cfToken) {
+      try {
+        const cfModelId = MODELS[modelKey].id
+        text = await callCloudflare(cfModelId, msgs)
+      } catch (cfErr: any) {
+        // If Cloudflare fails (e.g. invalid cfk_ or account), fallback to other configured keys
+        if (keys.openaiKey) {
+          const res = await callOpenAICompatible(messages, opts)
+          text = `> *(Cloudflare: ${cfErr.message}. Ответ через ${keys.openaiModel})*\n\n${res.text}`
+          reasoning = res.reasoning
+        } else if (keys.google) {
+          text = await callGoogleGemini('gemini-1.5-flash-latest', msgs, opts?.imageBase64)
+        } else {
+          throw cfErr
+        }
+      }
+    } else if (keys.openaiKey) {
       const res = await callOpenAICompatible(messages, opts)
       text = res.text
       reasoning = res.reasoning
+    } else if (keys.google) {
+      text = await callGoogleGemini('gemini-1.5-flash-latest', msgs, opts?.imageBase64)
     } else {
-      const cfModelId = MODELS[modelKey].id
-      text = await callCloudflare(cfModelId, msgs)
+      throw new Error(
+        'MISSING_CREDENTIALS: Не указан API ключ. Откройте Настройки (вкладка «API Ключи») и настройте ключ Google Gemini, OpenAI/Groq или Cloudflare.'
+      )
     }
   }
 
@@ -530,14 +620,25 @@ export async function chatCompletion(
 }
 
 export async function generateImageCloudflare(prompt: string): Promise<string | null> {
-  const { cfAccount, cfToken } = await getKeys()
+  const { cfAccount, cfToken, cfEmail } = await getKeys()
   if (!cfAccount || !cfToken) return null
+
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json'
+  }
+  if (cfToken.startsWith('cfk_') && cfEmail) {
+    headers['X-Auth-Key'] = cfToken.trim()
+    headers['X-Auth-Email'] = cfEmail.trim()
+  } else {
+    headers['Authorization'] = `Bearer ${cfToken.trim()}`
+  }
+
   try {
     const res = await fetch(
-      `https://api.cloudflare.com/client/v4/accounts/${cfAccount}/ai/run/@cf/stabilityai/stable-diffusion-xl-base-1.0`,
+      `https://api.cloudflare.com/client/v4/accounts/${cfAccount.trim()}/ai/run/@cf/stabilityai/stable-diffusion-xl-base-1.0`,
       {
         method: 'POST',
-        headers: { Authorization: `Bearer ${cfToken}`, 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify({ prompt })
       }
     )
