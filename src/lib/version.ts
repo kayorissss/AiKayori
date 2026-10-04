@@ -1,4 +1,4 @@
-export const APP_VERSION = '5.0.4'
+export const APP_VERSION = '5.0.5'
 export const APP_NAME = 'AI-KAYORI'
 export const APP_BUILD = `build-${Date.now()}`
 export const APP_FULL_NAME = `${APP_NAME}`

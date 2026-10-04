@@ -398,7 +398,8 @@ export async function callGoogleGemini(
           throw new Error('INVALID_GOOGLE_KEY: Введённый API ключ Google Gemini недействителен. Проверьте ключ в Настройках.')
         }
         if (res.status === 429) {
-          throw new Error('QUOTA_EXCEEDED: Превышен лимит запросов к Google Gemini API. Попробуйте через минуту.')
+          lastErrorMsg = 'QUOTA_EXCEEDED: Превышен лимит запросов к Google Gemini API (попробуйте через минуту или используйте Flash-модель).'
+          continue
         }
 
         // Check if Google returned a recommended model in the error message!
@@ -628,6 +629,23 @@ export async function translateTextToRussian(text: string): Promise<string> {
   throw new Error('Не удалось перевести текст. Проверьте интернет-соединение.')
 }
 
+// Model availability helper
+export async function getModelStatusMap(): Promise<Record<ModelId, { configured: boolean; provider: string; reason?: string }>> {
+  const keys = await getKeys()
+  const hasGoogle = !!keys.google.trim()
+  const hasCf = !!(keys.cfAccount.trim() && keys.cfToken.trim())
+  const hasOpenai = !!keys.openaiKey.trim()
+
+  return {
+    google: { configured: hasGoogle, provider: 'Google AI', reason: hasGoogle ? undefined : 'Требуется API ключ Google Gemini' },
+    geminiPro: { configured: hasGoogle, provider: 'Google AI', reason: hasGoogle ? undefined : 'Требуется API ключ Google Gemini' },
+    custom: { configured: hasOpenai, provider: 'OpenAI / Groq', reason: hasOpenai ? undefined : 'Требуется API ключ OpenAI или Groq' },
+    llama31: { configured: hasCf, provider: 'Cloudflare', reason: hasCf ? undefined : 'Требуется Account ID и токен Cloudflare' },
+    mistral: { configured: hasCf, provider: 'Cloudflare', reason: hasCf ? undefined : 'Требуется Account ID и токен Cloudflare' },
+    qwen: { configured: hasCf, provider: 'Cloudflare', reason: hasCf ? undefined : 'Требуется Account ID и токен Cloudflare' }
+  }
+}
+
 export async function chatCompletion(
   modelKey: ModelId,
   messages: AiMessage[],
@@ -655,17 +673,65 @@ export async function chatCompletion(
   let reasoning: string | undefined = undefined
 
   if (modelKey === 'google' || modelKey === 'geminiPro') {
-    if (!keys.google && keys.openaiKey) {
-      const res = await callOpenAICompatible(messages, opts)
-      return {
-        text: `> *Ответ получен через ${keys.openaiModel || 'OpenAI API'} (ключ Google Gemini не был указан)*\n\n${res.text}`,
-        modelInfo: MODELS[modelKey],
-        reasoning: res.reasoning
+    if (!keys.google) {
+      if (keys.cfAccount && keys.cfToken) {
+        const cfText = await callCloudflare(MODELS.llama31.id, msgs)
+        return {
+          text: `> *(Ключ Google Gemini не настроен. Ответ получен через Cloudflare Llama 3.1)*\n\n${cfText}`,
+          modelInfo: MODELS[modelKey]
+        }
+      } else if (keys.openaiKey) {
+        const res = await callOpenAICompatible(messages, opts)
+        return {
+          text: `> *(Ключ Google Gemini не настроен. Ответ получен через ${keys.openaiModel})*\n\n${res.text}`,
+          modelInfo: MODELS[modelKey],
+          reasoning: res.reasoning
+        }
       }
     }
-    const modelConfig = MODELS[modelKey]
-    text = await callGoogleGemini(modelConfig.id, msgs, opts?.imageBase64)
+
+    try {
+      const modelConfig = MODELS[modelKey]
+      text = await callGoogleGemini(modelConfig.id, msgs, opts?.imageBase64)
+    } catch (gErr: any) {
+      // Auto-fallback if Google Gemini limits are exceeded
+      if (keys.cfAccount && keys.cfToken) {
+        try {
+          const cfText = await callCloudflare(MODELS.llama31.id, msgs)
+          return {
+            text: `> *(Google Gemini: лимит исчерпан. Ответ автоматически получен через Cloudflare Llama 3.1)*\n\n${cfText}`,
+            modelInfo: MODELS[modelKey]
+          }
+        } catch {}
+      }
+      if (keys.openaiKey) {
+        try {
+          const res = await callOpenAICompatible(messages, opts)
+          return {
+            text: `> *(Google Gemini: лимит исчерпан. Ответ получен через ${keys.openaiModel})*\n\n${res.text}`,
+            modelInfo: MODELS[modelKey],
+            reasoning: res.reasoning
+          }
+        } catch {}
+      }
+      throw gErr
+    }
   } else if (modelKey === 'custom') {
+    if (!keys.openaiKey) {
+      if (keys.cfAccount && keys.cfToken) {
+        const cfText = await callCloudflare(MODELS.llama31.id, msgs)
+        return {
+          text: `> *(Ключ OpenAI / Groq не настроен в Настройках. Ответ автоматически получен через Cloudflare Llama 3.1)*\n\n${cfText}`,
+          modelInfo: MODELS[modelKey]
+        }
+      } else if (keys.google) {
+        const gText = await callGoogleGemini('gemini-3.8-flash', msgs, opts?.imageBase64)
+        return {
+          text: `> *(Ключ OpenAI / Groq не настроен. Ответ автоматически получен через Google Gemini)*\n\n${gText}`,
+          modelInfo: MODELS[modelKey]
+        }
+      }
+    }
     const res = await callOpenAICompatible(messages, opts)
     text = res.text
     reasoning = res.reasoning

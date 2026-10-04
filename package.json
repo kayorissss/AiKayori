@@ -1,6 +1,6 @@
 {
   "name": "ai-kayori",
-  "version": "5.0.4",
+  "version": "5.0.5",
   "productName": "AI-Kayori",
   "description": "AI-Kayori — приватный AI ассистент с котиком. Чёрная тема, Google Gemini + Cloudflare Workers AI.",
   "type": "module",
