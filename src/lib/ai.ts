@@ -24,10 +24,10 @@ export async function getKeys(): Promise<ApiKeysConfig> {
   const customOpenaiUrl = (await getSetting<string>('custom-openai-url')) || localStorage.getItem('custom-openai-url') || 'https://api.openai.com/v1'
   const customOpenaiModel = (await getSetting<string>('custom-openai-model')) || localStorage.getItem('custom-openai-model') || 'gpt-4o-mini'
 
-  const envGoogle = import.meta.env.VITE_GOOGLE_API_KEY || ''
-  const envCfAccount = import.meta.env.VITE_CF_ACCOUNT_ID || ''
-  const envCfToken = import.meta.env.VITE_CF_API_TOKEN || ''
-  const envOpenaiKey = import.meta.env.VITE_OPENAI_API_KEY || ''
+  const envGoogle = (import.meta as any).env?.VITE_GOOGLE_API_KEY || ''
+  const envCfAccount = (import.meta as any).env?.VITE_CF_ACCOUNT_ID || ''
+  const envCfToken = (import.meta as any).env?.VITE_CF_API_TOKEN || ''
+  const envOpenaiKey = (import.meta as any).env?.VITE_OPENAI_API_KEY || ''
 
   return {
     google: customGoogle || envGoogle,
@@ -66,32 +66,97 @@ export async function saveKeys(keys: Partial<ApiKeysConfig>) {
   }
 }
 
+// Dynamically discover valid Gemini models for this specific API key
+export async function getAvailableGoogleModels(key: string): Promise<string[]> {
+  try {
+    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${key.trim()}`)
+    if (res.ok) {
+      const data = await res.json()
+      const models: any[] = data.models || []
+      const supported = models
+        .filter((m: any) => m.supportedGenerationMethods?.includes('generateContent'))
+        .map((m: any) => m.name.replace(/^models\//, ''))
+      if (supported.length > 0) return supported
+    }
+  } catch {}
+  return [
+    'gemini-1.5-flash-latest',
+    'gemini-1.5-flash',
+    'gemini-2.0-flash',
+    'gemini-1.5-flash-002',
+    'gemini-1.5-flash-001',
+    'gemini-1.5-pro-latest',
+    'gemini-1.5-pro'
+  ]
+}
+
 // Key verification tests
 export async function testGoogleKey(key: string): Promise<{ ok: boolean; message: string }> {
   const trimmed = key.trim()
   if (!trimmed) return { ok: false, message: 'Ключ пустой' }
+
   try {
-    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${trimmed}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents: [{ role: 'user', parts: [{ text: 'Ответь одним словом: "ОК"' }] }],
-        generationConfig: { maxOutputTokens: 10 }
-      })
-    })
-    const data = await res.json()
-    if (!res.ok) {
-      const err = data.error?.message || `Ошибка HTTP ${res.status}`
+    // 1. First test using list models (validates key validity and gets supported model list)
+    const listRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${trimmed}`)
+    const listData = await listRes.json()
+
+    if (!listRes.ok) {
+      const err = listData.error?.message || `Ошибка HTTP ${listRes.status}`
       return { ok: false, message: err }
     }
-    const text = data.candidates?.[0]?.content?.parts?.[0]?.text || 'Подключено'
-    return { ok: true, message: `Успешно! Ответ модели: ${text.trim()}` }
+
+    const available = (listData.models || [])
+      .filter((m: any) => m.supportedGenerationMethods?.includes('generateContent'))
+      .map((m: any) => m.name.replace(/^models\//, ''))
+
+    const testModel =
+      available.find((m: string) => m.includes('1.5-flash') || m.includes('flash') || m.includes('2.0')) ||
+      available[0] ||
+      'gemini-1.5-flash-latest'
+
+    // 2. Perform a test completion with the discovered model
+    const testEndpoints = [
+      `https://generativelanguage.googleapis.com/v1beta/models/${testModel}:generateContent?key=${trimmed}`,
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${trimmed}`,
+      `https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=${trimmed}`,
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-002:generateContent?key=${trimmed}`
+    ]
+
+    for (const url of testEndpoints) {
+      try {
+        const res = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contents: [{ role: 'user', parts: [{ text: 'Ответь словом "ОК"' }] }],
+            generationConfig: { maxOutputTokens: 10 }
+          })
+        })
+        const data = await res.json()
+        if (res.ok) {
+          const text = data.candidates?.[0]?.content?.parts?.[0]?.text || 'ОК'
+          return {
+            ok: true,
+            message: `Подключено! Модель: ${testModel}. Ответ: ${text.trim()}`
+          }
+        }
+      } catch {}
+    }
+
+    return {
+      ok: true,
+      message: `Ключ подтвержден! Доступно моделей: ${available.length} (${testModel})`
+    }
   } catch (e: any) {
     return { ok: false, message: e.message || 'Ошибка сети' }
   }
 }
 
-export async function testOpenAIKey(key: string, baseUrl: string = 'https://api.openai.com/v1', model: string = 'gpt-4o-mini'): Promise<{ ok: boolean; message: string }> {
+export async function testOpenAIKey(
+  key: string,
+  baseUrl: string = 'https://api.openai.com/v1',
+  model: string = 'gpt-4o-mini'
+): Promise<{ ok: boolean; message: string }> {
   const trimmed = key.trim()
   if (!trimmed) return { ok: false, message: 'Ключ пустой' }
   const cleanUrl = baseUrl.trim().replace(/\/+$/, '')
@@ -100,7 +165,7 @@ export async function testOpenAIKey(key: string, baseUrl: string = 'https://api.
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${trimmed}`
+        Authorization: `Bearer ${trimmed}`
       },
       body: JSON.stringify({
         model: model.trim() || 'gpt-4o-mini',
@@ -128,7 +193,7 @@ export async function testCloudflareKey(account: string, token: string): Promise
     const res = await fetch(`https://api.cloudflare.com/client/v4/accounts/${acc}/ai/run/@cf/meta/llama-3.1-8b-instruct`, {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${tok}`,
+        Authorization: `Bearer ${tok}`,
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
@@ -152,7 +217,6 @@ function isForbiddenQuery(text: string): boolean {
   return /(детская порнография|child porn|cp\s)/i.test(text)
 }
 
-// Convert conversation messages into Google Gemini contents format
 function prepareGeminiContents(messages: AiMessage[], imageBase64?: string) {
   const filtered = messages.filter(m => m.role !== 'system')
   const contents: Array<{ role: 'user' | 'model'; parts: Array<any> }> = []
@@ -161,7 +225,6 @@ function prepareGeminiContents(messages: AiMessage[], imageBase64?: string) {
     const msg = filtered[i]
     const role: 'user' | 'model' = msg.role === 'assistant' ? 'model' : 'user'
 
-    // Gemini requires strict alternating user/model turns
     if (contents.length > 0 && contents[contents.length - 1].role === role) {
       contents[contents.length - 1].parts.push({ text: msg.content })
     } else {
@@ -172,12 +235,10 @@ function prepareGeminiContents(messages: AiMessage[], imageBase64?: string) {
     }
   }
 
-  // Ensure first turn is user
   if (contents.length > 0 && contents[0].role !== 'user') {
     contents.unshift({ role: 'user', parts: [{ text: 'Привет' }] })
   }
 
-  // Attach image to the last user message
   if (imageBase64 && contents.length > 0) {
     let lastUserIndex = -1
     for (let i = contents.length - 1; i >= 0; i--) {
@@ -221,7 +282,18 @@ export async function callGoogleGemini(
   }
 
   const contents = prepareGeminiContents(messages, imageBase64)
-  const realModel = modelId.includes('pro') ? 'gemini-1.5-pro' : 'gemini-1.5-flash'
+  const isPro = modelId.includes('pro')
+
+  // List of fallback candidates so 404 never occurs
+  const candidateModels = isPro
+    ? ['gemini-1.5-pro-latest', 'gemini-1.5-pro', 'gemini-1.5-pro-002', 'gemini-1.5-pro-001', 'gemini-pro']
+    : ['gemini-1.5-flash-latest', 'gemini-1.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash-002', 'gemini-1.5-flash-001', 'gemini-pro']
+
+  const candidateUrls: string[] = []
+  for (const m of candidateModels) {
+    candidateUrls.push(`https://generativelanguage.googleapis.com/v1beta/models/${m}:generateContent?key=${google}`)
+    candidateUrls.push(`https://generativelanguage.googleapis.com/v1/models/${m}:generateContent?key=${google}`)
+  }
 
   const body = {
     contents,
@@ -238,40 +310,49 @@ export async function callGoogleGemini(
     }
   }
 
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${realModel}:generateContent?key=${google}`
+  let lastErrorMsg = ''
 
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body)
-  })
+  for (const url of candidateUrls) {
+    try {
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      })
 
-  const data = await res.json()
+      const data = await res.json()
 
-  if (!res.ok) {
-    const errorMsg = data.error?.message || `Google API Error: HTTP ${res.status}`
-    if (res.status === 400 && errorMsg.includes('API key not valid')) {
-      throw new Error(
-        `INVALID_GOOGLE_KEY: Введённый API ключ Google Gemini недействителен. Проверьте ключ в Настройках приложения (https://aistudio.google.com/app/apikey).`
-      )
+      if (!res.ok) {
+        lastErrorMsg = data.error?.message || `HTTP ${res.status}`
+        // If 404 (model not found for this version), try next candidate URL
+        if (res.status === 404 || lastErrorMsg.includes('not found')) {
+          continue
+        }
+        if (res.status === 400 && lastErrorMsg.includes('API key not valid')) {
+          throw new Error('INVALID_GOOGLE_KEY: Введённый API ключ Google Gemini недействителен. Проверьте ключ в Настройках.')
+        }
+        if (res.status === 429) {
+          throw new Error('QUOTA_EXCEEDED: Превышен лимит запросов к Google Gemini API. Попробуйте через минуту.')
+        }
+        throw new Error(`Ошибка Google Gemini: ${lastErrorMsg}`)
+      }
+
+      const candidate = data.candidates?.[0]
+      if (candidate?.finishReason === 'SAFETY') {
+        return 'Запрос заблокирован фильтром безопасности Google Gemini.'
+      }
+
+      const text = candidate?.content?.parts?.[0]?.text
+      if (text) return text
+    } catch (e: any) {
+      if (e.message?.startsWith('INVALID_GOOGLE_KEY') || e.message?.startsWith('QUOTA_EXCEEDED')) {
+        throw e
+      }
+      lastErrorMsg = e.message || lastErrorMsg
     }
-    if (res.status === 429) {
-      throw new Error(`QUOTA_EXCEEDED: Превышен лимит запросов к Google Gemini API. Попробуйте снова через минуту.`)
-    }
-    throw new Error(`Ошибка Google Gemini: ${errorMsg}`)
   }
 
-  const candidate = data.candidates?.[0]
-  if (candidate?.finishReason === 'SAFETY') {
-    return 'Запрос заблокирован фильтром безопасности Google Gemini.'
-  }
-
-  const text = candidate?.content?.parts?.[0]?.text
-  if (!text) {
-    throw new Error('Модель Google Gemini вернула пустой ответ.')
-  }
-
-  return text
+  throw new Error(`Не удалось получить ответ от Google Gemini: ${lastErrorMsg}`)
 }
 
 export async function callOpenAICompatible(
@@ -287,7 +368,6 @@ export async function callOpenAICompatible(
 
   const formattedMessages: any[] = []
 
-  // System instruction
   formattedMessages.push({
     role: 'system',
     content:
@@ -298,7 +378,6 @@ export async function callOpenAICompatible(
     const m = messages[i]
     if (m.role === 'system') continue
 
-    // For the last user message, attach image or file if present
     if (i === messages.length - 1 && m.role === 'user' && (opts?.imageBase64 || opts?.fileContent)) {
       if (opts.imageBase64) {
         formattedMessages.push({
@@ -331,7 +410,7 @@ export async function callOpenAICompatible(
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'Authorization': `Bearer ${openaiKey}`
+      Authorization: `Bearer ${openaiKey}`
     },
     body: JSON.stringify({
       model: openaiModel || 'gpt-4o-mini',
@@ -363,14 +442,14 @@ export async function callCloudflare(modelId: string, messages: AiMessage[]): Pr
   const { cfAccount, cfToken } = await getKeys()
   if (!cfAccount || !cfToken) {
     throw new Error(
-      'MISSING_CLOUDFLARE_CREDENTIALS: Для работы моделей Cloudflare (Llama, Mistral, Qwen) укажите Cloudflare Account ID и API Token в «Настройках» → «API Ключи». Либо переключитесь на Google Gemini или Custom API.'
+      'MISSING_CLOUDFLARE_CREDENTIALS: Для работы моделей Cloudflare укажите Account ID и API Token в Настройках, либо используйте Google Gemini или OpenAI/Groq.'
     )
   }
 
   const res = await fetch(`https://api.cloudflare.com/client/v4/accounts/${cfAccount}/ai/run/${modelId}`, {
     method: 'POST',
     headers: {
-      'Authorization': `Bearer ${cfToken}`,
+      Authorization: `Bearer ${cfToken}`,
       'Content-Type': 'application/json'
     },
     body: JSON.stringify({
@@ -408,7 +487,6 @@ export async function chatCompletion(
 
   const keys = await getKeys()
 
-  // Format message history with file content if present
   let msgs = [...messages]
   if (opts?.fileContent && modelKey !== 'custom' && modelKey !== 'google' && modelKey !== 'geminiPro') {
     msgs[msgs.length - 1] = {
@@ -420,9 +498,7 @@ export async function chatCompletion(
   let text = ''
   let reasoning: string | undefined = undefined
 
-  // Route according to model choice
   if (modelKey === 'google' || modelKey === 'geminiPro') {
-    // If user has no Google key, but configured OpenAI/Groq, inform or seamlessly fallback
     if (!keys.google && keys.openaiKey) {
       const res = await callOpenAICompatible(messages, opts)
       return {
@@ -438,12 +514,9 @@ export async function chatCompletion(
     text = res.text
     reasoning = res.reasoning
   } else {
-    // Cloudflare models (llama31, llama3, mistral, qwen)
     if ((!keys.cfAccount || !keys.cfToken) && keys.google) {
-      // If Cloudflare is not configured but Google is configured, use Gemini to answer
-      text = await callGoogleGemini('gemini-1.5-flash', msgs, opts?.imageBase64)
+      text = await callGoogleGemini('gemini-1.5-flash-latest', msgs, opts?.imageBase64)
     } else if ((!keys.cfAccount || !keys.cfToken) && keys.openaiKey) {
-      // Or use OpenAI
       const res = await callOpenAICompatible(messages, opts)
       text = res.text
       reasoning = res.reasoning

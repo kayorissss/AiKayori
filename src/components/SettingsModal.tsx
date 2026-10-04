@@ -496,6 +496,32 @@ export default function SettingsModal({ open, onClose, theme = 'dark', onToggleT
                               <div className={`text-[11px] ${subtextColor}`}>Для Llama 3.1, Mistral, Qwen и генерации картинок SDXL</div>
                             </div>
                           </div>
+                          <a
+                            href="https://dash.cloudflare.com/profile/api-tokens"
+                            target="_blank"
+                            rel="noreferrer"
+                            className="text-[11px] font-semibold text-[#F38020] hover:underline"
+                          >
+                            Создать токен ↗
+                          </a>
+                        </div>
+
+                        {/* Guide banner for Cloudflare */}
+                        <div className={`rounded-[12px] p-3 text-[11.5px] leading-[1.6] mb-3 border ${
+                          isLight ? 'bg-amber-500/5 border-amber-500/20 text-[#78350F]' : 'bg-amber-500/10 border-amber-500/20 text-[#FDE68A]'
+                        }`}>
+                          <div className="font-bold mb-1">📖 Где взять Account ID и API Token:</div>
+                          <ul className="list-disc pl-4 space-y-1">
+                            <li>
+                              <b>Account ID:</b> Войдите на <a href="https://dash.cloudflare.com" target="_blank" rel="noreferrer" className="underline font-bold">dash.cloudflare.com</a>. Ваш 32-значный ID указан прямо в адресной строке браузера (<code>dash.cloudflare.com/<b>ВАШ_ID</b>/...</code>), либо на главной странице в правом сайдбаре в блоке «API».
+                            </li>
+                            <li>
+                              <b>API Token:</b> Откройте <a href="https://dash.cloudflare.com/profile/api-tokens" target="_blank" rel="noreferrer" className="underline font-bold">API Tokens</a> → нажмите <b>Create Token</b> → выберите готовый шаблон <b>Workers AI (Read and Write)</b> → нажмите <b>Create</b> и скопируйте токен.
+                            </li>
+                          </ul>
+                          <div className="mt-2 text-[10.5px] opacity-90">
+                            💡 <b>Лайфхак:</b> Если у вас есть ключ от Telegram-бота (Groq, OpenAI, OpenRouter), вы можете вставить его в блок <b>OpenAI / Groq</b> выше — тогда настраивать Cloudflare не нужно!
+                          </div>
                         </div>
 
                         <div className="space-y-3 mt-3">
