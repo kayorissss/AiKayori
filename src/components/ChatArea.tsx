@@ -10,7 +10,8 @@ function formatDateSeparator(ts: number) {
   const d = new Date(ts)
   const now = new Date()
   const isToday = d.toDateString() === now.toDateString()
-  const yesterday = new Date(now); yesterday.setDate(now.getDate()-1)
+  const yesterday = new Date(now)
+  yesterday.setDate(now.getDate() - 1)
   const isYesterday = d.toDateString() === yesterday.toDateString()
   if (isToday) return `Сегодня • ${d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' })}`
   if (isYesterday) return `Вчера • ${d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' })}`
@@ -18,7 +19,7 @@ function formatDateSeparator(ts: number) {
 }
 
 function groupByDate(messages: any[]) {
-  const groups: { dateLabel: string, dateKey: string, msgs: any[] }[] = []
+  const groups: { dateLabel: string; dateKey: string; msgs: any[] }[] = []
   let currentKey = ''
   let currentGroup: any = null
   messages.forEach(m => {
@@ -33,7 +34,15 @@ function groupByDate(messages: any[]) {
   return groups
 }
 
-export default function ChatArea({ showFiles, setShowFiles, theme }: { showFiles?: boolean, setShowFiles?: (v: boolean) => void, theme?: string }) {
+export default function ChatArea({
+  showFiles,
+  setShowFiles,
+  theme = 'dark'
+}: {
+  showFiles?: boolean
+  setShowFiles?: (v: boolean) => void
+  theme?: string
+}) {
   const { chats, activeChatId, currentModel } = useChatStore()
   const addMessage = useChatStore(s => s.addMessage)
   const updateLastMessage = useChatStore(s => s.updateLastMessage)
@@ -47,50 +56,56 @@ export default function ChatArea({ showFiles, setShowFiles, theme }: { showFiles
   const [chatSearch, setChatSearch] = useState('')
   const [showChatSearch, setShowChatSearch] = useState(false)
   const [showChatMenu, setShowChatMenu] = useState(false)
-  const [typingLabel, setTypingLabel] = useState('Думает')
   const [editingTitle, setEditingTitle] = useState(false)
   const [titleDraft, setTitleDraft] = useState('')
 
+  const isLight = theme === 'light'
+
   const filteredMessages = useMemo(() => {
     if (!activeChat) return []
-    if (!chatSearch) return activeChat.messages
-    return activeChat.messages.filter(m => m.content.toLowerCase().includes(chatSearch.toLowerCase()))
+    if (!chatSearch.trim()) return activeChat.messages
+    const q = chatSearch.toLowerCase()
+    return activeChat.messages.filter(m => m.content.toLowerCase().includes(q))
   }, [activeChat?.messages, chatSearch])
 
   const grouped = useMemo(() => groupByDate(filteredMessages), [filteredMessages])
 
-  // Auto scroll only if user near bottom, allow scroll during typing
+  // Gentle scroll to bottom
   useEffect(() => {
     if (!scrollRef.current) return
     const el = scrollRef.current
-    const isNearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 400
+    const isNearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 450
     if (isNearBottom) {
-      // don't block user scroll - just gentle scroll
       el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' })
     }
   }, [filteredMessages.length, isGenerating, reasoningText])
 
-  useEffect(() => { setIsGenerating(false); setReasoningText('') }, [activeChatId])
-
-  // Varied typing indicator
   useEffect(() => {
-    if (!isGenerating) return
-    const labels = ['Думает', 'Печатает', 'Размышляет', 'Анализирует']
-    let i = 0
-    const int = setInterval(() => { i = (i + 1) % labels.length; setTypingLabel(labels[i]) }, 1200)
-    return () => clearInterval(int)
-  }, [isGenerating])
+    setIsGenerating(false)
+    setReasoningText('')
+  }, [activeChatId])
 
-  const handleSend = async (text: string, opts?: { imageBase64?: string, fileContent?: string, fileName?: string }) => {
-    if (!activeChatId) return
+  const handleSend = async (
+    text: string,
+    opts?: { imageBase64?: string; fileContent?: string; fileName?: string }
+  ) => {
+    let targetChatId = activeChatId
+    if (!targetChatId) {
+      targetChatId = useChatStore.getState().createNewChat()
+    }
+
     const userMsg: ChatMessage = {
       id: Math.random().toString(36).slice(2),
       role: 'user',
       content: text || (opts?.fileName ? `Файл: ${opts.fileName}` : ''),
       timestamp: Date.now(),
-      attachments: opts?.imageBase64 ? [{ type: 'image', url: opts.imageBase64 }] : opts?.fileName ? [{ type: 'file', url: '', name: opts.fileName, content: opts.fileContent }] : undefined
+      attachments: opts?.imageBase64
+        ? [{ type: 'image', url: opts.imageBase64 }]
+        : opts?.fileName
+        ? [{ type: 'file', url: '', name: opts.fileName, content: opts.fileContent }]
+        : undefined
     }
-    await addMessage(activeChatId, userMsg)
+    await addMessage(targetChatId, userMsg)
 
     const placeholder: ChatMessage = {
       id: Math.random().toString(36).slice(2),
@@ -101,112 +116,293 @@ export default function ChatArea({ showFiles, setShowFiles, theme }: { showFiles
       modelName: currentModel,
       isGenerating: true
     }
-    await addMessage(activeChatId, placeholder)
+    await addMessage(targetChatId, placeholder)
     setIsGenerating(true)
-    setReasoningText('Думаю 1.2 сек... Анализирую запрос')
-    setReasoningOpen(true)
+    setReasoningText('')
 
     try {
-      const history = (activeChat?.messages || []).slice(-16).map(m => ({
+      const chatNow = useChatStore.getState().chats.find(c => c.id === targetChatId)
+      const history = (chatNow?.messages || []).slice(0, -1).slice(-16).map(m => ({
         role: m.role as 'user' | 'assistant' | 'system',
-        content: m.content + (m.attachments?.[0]?.name ? `\n[Файл: ${m.attachments[0].name}]\n${(m.attachments[0].content || '').slice(0,2000)}` : '')
+        content: m.content
       }))
-      history.push({ role: 'user', content: text + (opts?.fileName ? `\n[Файл: ${opts.fileName}]\n${(opts.fileContent || '').slice(0,8000)}` : '') })
 
       const { text: answer, reasoning } = await chatCompletion(currentModel, history, {
         imageBase64: opts?.imageBase64,
-        fileContent: opts?.fileContent
+        fileContent: opts?.fileContent,
+        fileName: opts?.fileName
       })
 
-      // Show reasoning like DeepSeek
       if (reasoning) {
         setReasoningText(reasoning)
-        await new Promise(r => setTimeout(r, 600))
       }
 
+      // Stream text smoothly
       let current = ''
-      for (let i = 0; i < answer.length; i += 2) {
-        current = answer.slice(0, i + 2)
-        await updateLastMessage(activeChatId, current)
-        await new Promise(r => setTimeout(r, 8 + Math.random()*14))
+      const step = Math.max(1, Math.floor(answer.length / 50))
+      for (let i = 0; i < answer.length; i += step) {
+        current = answer.slice(0, i + step)
+        await updateLastMessage(targetChatId, current)
+        await new Promise(r => setTimeout(r, 12))
       }
-      await finalizeLastMessage(activeChatId, answer)
-      setReasoningText('')
+      await finalizeLastMessage(targetChatId, answer)
     } catch (e: any) {
-      await updateLastMessage(activeChatId, `Ошибка: ${e.message}`)
+      const errMsg = e.message || 'Произошла непредвиденная ошибка при запросе к ИИ.'
+      const isMissingKey = errMsg.includes('MISSING_') || errMsg.includes('INVALID_')
+      const formatted = isMissingKey
+        ? `⚠️ **Внимание:** ${errMsg}\n\n*Нажмите кнопку ниже или откройте Настройки в левом меню, чтобы указать API-ключ.*`
+        : `❌ **Ошибка запроса к ИИ:**\n\n${errMsg}`
+
+      await finalizeLastMessage(targetChatId, formatted)
     } finally {
       setIsGenerating(false)
     }
   }
 
+  // Theme styling
+  const mainBg = isLight ? 'bg-[#F6F7F9]' : 'bg-[#080808]'
+  const headerBg = isLight ? 'bg-white/90 border-black/10 text-[#111827]' : 'bg-[#0A0A0A]/90 border-white/[0.06] text-white'
+  const cardBorder = isLight ? 'border-black/10' : 'border-white/[0.08]'
+  const textColor = isLight ? 'text-[#111827]' : 'text-white'
+  const subtextColor = isLight ? 'text-[#6B7280]' : 'text-[#888888]'
+  const promptBtnBg = isLight
+    ? 'bg-white border-black/10 text-[#1F2937] hover:bg-black/5 hover:border-black/20 shadow-sm'
+    : 'bg-white/[0.05] border-white/[0.08] text-[#CCCCCC] hover:bg-white/[0.1] hover:text-white'
+
+  // Empty state screen (when no active chat)
   if (!activeChat) {
     return (
-      <div className="flex-1 flex flex-col items-center justify-end pb-[28%] p-4 md:p-8 bg-[#080808] relative overflow-hidden min-h-0">
-        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.35, ease: 'easeOut' }} className="text-center relative z-10 w-full max-w-[420px]">
-          <div className="w-[64px] h-[64px] mx-auto rounded-[18px] overflow-hidden border border-white/[0.08] bg-white/[0.04] flex items-center justify-center mb-4">
-            <img src="./logo-kayori.png" alt="Kayori" className="w-full h-full object-cover" />
-          </div>
-          <h1 className="text-[20px] font-bold tracking-tight" style={{ fontFamily: 'Gotham, sans-serif', fontWeight: 700 }}>Начни диалог</h1>
-          <p className="text-[#666] text-[13px] mt-1.5 font-medium">Напиши сообщение или загрузи файл</p>
-          <div className="mt-5 flex flex-wrap gap-2 justify-center">
-            {[
-              { label: 'Почему другу жарко, а мне холодно?', prompt: 'Почему моему другу жарко хотя в комнате холодно, ну типа я вот под одеялом лежу и нормально, а ноги достаю и холодно, я живу в Сигаево, 3° на улице, в комнате нету отопления, не дали' },
-              { label: 'Создай кликер-игру', prompt: 'Создай кликер-игру html' },
-              { label: 'Калькулятор', prompt: 'Создай красивый калькулятор html' },
-              { label: 'Погода в Сигаево', prompt: 'Погода в Сигаево сейчас' }
-            ].map(item => (
-              <button key={item.label} onClick={() => { const id = useChatStore.getState().createNewChat(); setTimeout(() => handleSend(item.prompt), 80) }} className="px-3.5 py-2 rounded-full bg-white/[0.06] border border-white/[0.06] text-[12px] text-[#999] font-medium hover:bg-white/[0.10] hover:text-white transition">
-                {item.label}
-              </button>
-            ))}
-          </div>
-        </motion.div>
-        <div className="absolute bottom-6 w-full flex justify-center">
-          <div className="w-full max-w-[720px] px-4">
-            <InputBar onSend={handleSend} disabled={isGenerating} chatId={'empty'} showFilesToggle={!!setShowFiles} showFiles={!!showFiles} onToggleFiles={() => setShowFiles && setShowFiles(!showFiles)} />
-          </div>
+      <div className={`flex-1 flex flex-col ${mainBg} min-w-0 min-h-0 relative transition-colors`}>
+        <div className="flex-1 overflow-y-auto p-4 md:p-8 flex flex-col items-center justify-center">
+          <motion.div
+            initial={{ opacity: 0, y: 16 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.3 }}
+            className="text-center w-full max-w-[580px] my-auto py-6"
+          >
+            <div className={`w-[64px] h-[64px] mx-auto rounded-[20px] overflow-hidden border ${cardBorder} ${
+              isLight ? 'bg-white shadow-sm' : 'bg-white/[0.04]'
+            } flex items-center justify-center mb-4`}>
+              <img src="./logo-kayori.png" alt="Kayori" className="w-10 h-10 object-contain" />
+            </div>
+
+            <h1 className={`text-[22px] md:text-[24px] font-bold tracking-tight ${textColor}`}>
+              AI-KAYORI
+            </h1>
+            <p className={`text-[13px] md:text-[14px] mt-1.5 font-medium ${subtextColor}`}>
+              Ваш персональный ИИ ассистент с поддержкой фото, кода и документов
+            </p>
+
+            {/* Prompt suggestions */}
+            <div className="mt-8 grid grid-cols-1 sm:grid-cols-2 gap-2.5 text-left">
+              {[
+                {
+                  title: '💻 Написание кода',
+                  desc: 'Напиши функцию на JS для фильтрации массива объектов',
+                  prompt: 'Напиши полезную функцию на TypeScript/JavaScript для фильтрации и группировки массива объектов с примерами использования.'
+                },
+                {
+                  title: '💡 Простое объяснение',
+                  desc: 'Объясни как работает машинное обучение',
+                  prompt: 'Объясни простыми словами, как обучаются нейронные сети и современные большие языковые модели (LLM).'
+                },
+                {
+                  title: '📝 Работа с текстом',
+                  desc: 'Помоги составить структуру статьи или доклада',
+                  prompt: 'Помоги составить детальный план и структуру статьи на тему современных технологий ИИ.'
+                },
+                {
+                  title: '⚙️ Настройка API',
+                  desc: 'Как подключить свой ключ Gemini или OpenAI?',
+                  prompt: 'Расскажи, как настроить API ключи в этой программе (Google Gemini, Groq, OpenAI) и в чём их отличия.'
+                }
+              ].map(item => (
+                <button
+                  key={item.title}
+                  onClick={() => {
+                    const id = useChatStore.getState().createNewChat()
+                    setTimeout(() => handleSend(item.prompt), 50)
+                  }}
+                  className={`p-3.5 rounded-[16px] border transition flex flex-col gap-1 text-left ${promptBtnBg}`}
+                >
+                  <div className="text-[12.5px] font-bold">{item.title}</div>
+                  <div className={`text-[11px] line-clamp-2 ${subtextColor}`}>{item.desc}</div>
+                </button>
+              ))}
+            </div>
+          </motion.div>
         </div>
+
+        {/* Input Bar fixed cleanly at bottom */}
+        <InputBar
+          onSend={handleSend}
+          disabled={isGenerating}
+          chatId={'empty'}
+          theme={theme}
+          showFilesToggle={!!setShowFiles}
+          showFiles={!!showFiles}
+          onToggleFiles={() => setShowFiles && setShowFiles(!showFiles)}
+        />
       </div>
     )
   }
 
   return (
-    <div className="flex-1 flex flex-col bg-[#080808] min-w-0 min-h-0 relative">
-      <div className="h-[52px] border-b border-white/[0.06] flex items-center justify-between px-4 md:px-5 shrink-0 bg-[#0A0A0A] sticky top-0 z-10">
-        <div className="flex items-center gap-3 min-w-0 flex-1">
+    <div className={`flex-1 flex flex-col ${mainBg} min-w-0 min-h-0 relative transition-colors`}>
+      {/* Chat Top Header */}
+      <div className={`h-[52px] border-b ${headerBg} backdrop-blur-md flex items-center justify-between px-4 md:px-5 shrink-0 sticky top-0 z-10`}>
+        <div className="flex items-center gap-2.5 min-w-0 flex-1 mr-2">
           {editingTitle ? (
-            <input value={titleDraft} onChange={e => setTitleDraft(e.target.value)} onBlur={() => { if (titleDraft.trim()) renameChat(activeChat.id, titleDraft.trim()); setEditingTitle(false) }} onKeyDown={e => { if (e.key === 'Enter') { if (titleDraft.trim()) renameChat(activeChat.id, titleDraft.trim()); setEditingTitle(false) } if (e.key === 'Escape') setEditingTitle(false) }} className="bg-[#151515] border border-[#222] rounded-[8px] px-3 py-1 text-[13px] font-semibold w-[260px] focus:outline-none focus:border-[#333]" autoFocus />
+            <input
+              value={titleDraft}
+              onChange={e => setTitleDraft(e.target.value)}
+              onBlur={() => {
+                if (titleDraft.trim()) renameChat(activeChat.id, titleDraft.trim())
+                setEditingTitle(false)
+              }}
+              onKeyDown={e => {
+                if (e.key === 'Enter') {
+                  if (titleDraft.trim()) renameChat(activeChat.id, titleDraft.trim())
+                  setEditingTitle(false)
+                }
+                if (e.key === 'Escape') setEditingTitle(false)
+              }}
+              className={`border ${cardBorder} rounded-[8px] px-2.5 py-1 text-[13px] font-bold w-[240px] max-w-full ${
+                isLight ? 'bg-white text-black' : 'bg-[#151515] text-white'
+              }`}
+              autoFocus
+            />
           ) : (
-            <div className="text-[13px] font-semibold truncate cursor-pointer hover:text-white transition select-none" style={{ fontWeight: 700 }} onDoubleClick={() => { setTitleDraft(activeChat.title); setEditingTitle(true) }} title="Двойной клик — переименовать">
+            <div
+              className={`text-[13.5px] font-bold truncate cursor-pointer select-none ${textColor}`}
+              onDoubleClick={() => {
+                setTitleDraft(activeChat.title)
+                setEditingTitle(true)
+              }}
+              title="Двойной клик — переименовать"
+            >
               {activeChat.title}
             </div>
           )}
-          <div className="text-[10px] text-[#555] font-mono hidden md:block px-2.5 py-1 rounded-full bg-white/[0.04] border border-white/[0.06]">{activeChat.messages.length}</div>
+          <span className={`text-[10px] font-mono px-2 py-0.5 rounded-full border ${cardBorder} ${subtextColor} shrink-0`}>
+            {activeChat.messages.length} сообщ.
+          </span>
         </div>
-        <div className="flex items-center gap-1.5">
+
+        {/* Header Action Buttons */}
+        <div className="flex items-center gap-1.5 shrink-0">
           {setShowFiles && (
-            <button onClick={() => setShowFiles(!showFiles)} className={`w-8 h-8 rounded-full border flex items-center justify-center transition ${showFiles ? 'bg-white text-black border-white' : 'bg-[#151515] border-[#222] text-[#666] hover:text-white'}`} title={showFiles ? 'Скрыть файлы' : 'Показать файлы'}>
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><polyline points="13 2 13 9 20 9"/></svg>
+            <button
+              onClick={() => setShowFiles(!showFiles)}
+              className={`w-8 h-8 rounded-full border flex items-center justify-center transition ${
+                showFiles
+                  ? isLight
+                    ? 'bg-black text-white border-black'
+                    : 'bg-white text-black border-white'
+                  : isLight
+                  ? 'bg-black/5 border-black/10 text-[#4B5563] hover:text-black'
+                  : 'bg-white/[0.06] border-white/[0.08] text-[#888] hover:text-white'
+              }`}
+              title={showFiles ? 'Скрыть файлы' : 'Показать файлы'}
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z" />
+                <polyline points="13 2 13 9 20 9" />
+              </svg>
             </button>
           )}
+
           {showChatSearch ? (
-            <div className="flex items-center gap-2">
-              <input value={chatSearch} onChange={e => setChatSearch(e.target.value)} placeholder="Поиск..." className="bg-[#151515] border border-[#222] rounded-full px-3 py-1.5 text-[12px] w-[160px] focus:outline-none focus:border-[#333] font-medium" autoFocus />
-              <button onClick={() => { setShowChatSearch(false); setChatSearch('') }} className="w-7 h-7 rounded-full bg-[#1E1E1E] flex items-center justify-center hover:bg-[#252525]">×</button>
+            <div className="flex items-center gap-1.5">
+              <input
+                value={chatSearch}
+                onChange={e => setChatSearch(e.target.value)}
+                placeholder="Поиск..."
+                className={`border ${cardBorder} rounded-full px-3 py-1 text-[12px] w-[130px] md:w-[170px] ${
+                  isLight ? 'bg-white text-black' : 'bg-[#151515] text-white'
+                }`}
+                autoFocus
+              />
+              <button
+                onClick={() => {
+                  setShowChatSearch(false)
+                  setChatSearch('')
+                }}
+                className={`w-7 h-7 rounded-full flex items-center justify-center text-[12px] ${
+                  isLight ? 'bg-black/5 hover:bg-black/10' : 'bg-white/10 hover:bg-white/20'
+                }`}
+              >
+                ✕
+              </button>
             </div>
           ) : (
             <>
-              <button onClick={() => setShowChatSearch(true)} className="w-8 h-8 rounded-full bg-[#151515] border border-[#222] flex items-center justify-center hover:bg-[#1E1E1E] text-[#666] hover:text-white transition" title="Поиск в чате">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="6"/><path d="m21 21-4.3-4.3"/></svg>
+              <button
+                onClick={() => setShowChatSearch(true)}
+                className={`w-8 h-8 rounded-full border flex items-center justify-center transition ${
+                  isLight
+                    ? 'bg-black/5 border-black/10 text-[#4B5563] hover:text-black'
+                    : 'bg-white/[0.06] border-white/[0.08] text-[#888] hover:text-white'
+                }`}
+                title="Поиск в чате"
+              >
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <circle cx="11" cy="11" r="6" />
+                  <path d="m21 21-4.3-4.3" />
+                </svg>
               </button>
+
               <div className="relative">
-                <button onClick={() => setShowChatMenu(!showChatMenu)} className="w-8 h-8 rounded-full bg-[#151515] border border-[#222] flex items-center justify-center hover:bg-[#1E1E1E] text-[#666] hover:text-white" title="Меню чата">⋯</button>
+                <button
+                  onClick={() => setShowChatMenu(!showChatMenu)}
+                  className={`w-8 h-8 rounded-full border flex items-center justify-center transition font-bold ${
+                    isLight
+                      ? 'bg-black/5 border-black/10 text-[#4B5563] hover:text-black'
+                      : 'bg-white/[0.06] border-white/[0.08] text-[#888] hover:text-white'
+                  }`}
+                  title="Меню чата"
+                >
+                  ⋯
+                </button>
                 {showChatMenu && (
-                  <div className="absolute right-0 top-full mt-2 w-[180px] bg-[#151515] border border-white/[0.08] rounded-[12px] shadow-[0_12px_32px_rgba(0,0,0,0.6)] p-1 z-30">
-                    <button onClick={() => { setShowChatMenu(false); setTitleDraft(activeChat.title); setEditingTitle(true) }} className="w-full text-left px-3 py-2 rounded-[8px] text-[12px] hover:bg-white/[0.06]">✎ Переименовать</button>
-                    <button onClick={() => { setShowChatMenu(false); renameChat(activeChat.id, 'Новый чат') }} className="w-full text-left px-3 py-2 rounded-[8px] text-[12px] hover:bg-white/[0.06]">↺ Сбросить название</button>
-                    <div className="h-[1px] bg-white/[0.06] my-1" />
-                    <button onClick={() => { setShowChatMenu(false); useChatStore.getState().deleteChat(activeChat.id) }} className="w-full text-left px-3 py-2 rounded-[8px] text-[12px] hover:bg-[#FF4444]/10 text-[#FF6666]">Удалить чат</button>
+                  <div
+                    className={`absolute right-0 top-full mt-2 w-[180px] border rounded-[14px] p-1.5 z-30 shadow-xl ${
+                      isLight ? 'bg-white border-black/10 text-black' : 'bg-[#181818] border-white/[0.08] text-white'
+                    }`}
+                  >
+                    <button
+                      onClick={() => {
+                        setShowChatMenu(false)
+                        setTitleDraft(activeChat.title)
+                        setEditingTitle(true)
+                      }}
+                      className={`w-full text-left px-3 py-2 rounded-[8px] text-[12px] font-medium transition ${
+                        isLight ? 'hover:bg-black/5' : 'hover:bg-white/[0.06]'
+                      }`}
+                    >
+                      ✎ Переименовать
+                    </button>
+                    <button
+                      onClick={() => {
+                        setShowChatMenu(false)
+                        renameChat(activeChat.id, 'Новый диалог')
+                      }}
+                      className={`w-full text-left px-3 py-2 rounded-[8px] text-[12px] font-medium transition ${
+                        isLight ? 'hover:bg-black/5' : 'hover:bg-white/[0.06]'
+                      }`}
+                    >
+                      ↺ Сбросить заголовок
+                    </button>
+                    <div className={`h-[1px] my-1 ${isLight ? 'bg-black/5' : 'bg-white/[0.06]'}`} />
+                    <button
+                      onClick={() => {
+                        setShowChatMenu(false)
+                        useChatStore.getState().deleteChat(activeChat.id)
+                      }}
+                      className="w-full text-left px-3 py-2 rounded-[8px] text-[12px] font-medium text-rose-500 hover:bg-rose-500/10 transition"
+                    >
+                      Удалить чат
+                    </button>
                   </div>
                 )}
               </div>
@@ -215,56 +411,81 @@ export default function ChatArea({ showFiles, setShowFiles, theme }: { showFiles
         </div>
       </div>
 
-      <div ref={scrollRef} className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden p-3 md:p-6 space-y-0 scrollbar-thin">
+      {/* Messages Scroll Area */}
+      <div ref={scrollRef} className="flex-1 min-h-0 overflow-y-auto p-3 md:p-6 space-y-4 scrollbar-thin">
         {grouped.length === 0 ? (
-          <div className="text-center py-24">
-            <div className="w-12 h-12 mx-auto rounded-[14px] bg-white/[0.04] border border-white/[0.06] flex items-center justify-center mb-3"><img src="./logo-kayori.png" alt="k" className="w-7 h-7 rounded-full object-cover" /></div>
-            <div className="text-[14px] font-semibold">Начни диалог</div>
-            <div className="text-[12px] text-[#666] mt-1">Напиши сообщение</div>
-          </div>
-        ) : grouped.map((group) => (
-          <div key={group.dateKey}>
-            <div className="flex justify-center my-6">
-              <div className="px-3 py-1 rounded-full bg-white/[0.04] border border-white/[0.06] text-[11px] font-medium text-[#666]">{group.dateLabel}</div>
+          <div className="text-center py-20">
+            <div className={`w-12 h-12 mx-auto rounded-[16px] border ${cardBorder} flex items-center justify-center mb-3 ${
+              isLight ? 'bg-white' : 'bg-white/[0.04]'
+            }`}>
+              <img src="./logo-kayori.png" alt="Kayori" className="w-7 h-7 object-contain" />
             </div>
-            <div className="space-y-4">
-              {group.msgs.map((m: any) => (
-                <MessageBubble key={m.id} message={m} />
-              ))}
-            </div>
+            <div className={`text-[14px] font-bold ${textColor}`}>Диалог пуст</div>
+            <div className={`text-[12px] mt-1 ${subtextColor}`}>Напишите первое сообщение ниже</div>
           </div>
-        ))}
+        ) : (
+          grouped.map(group => (
+            <div key={group.dateKey}>
+              {/* Date divider badge */}
+              <div className="flex justify-center my-5">
+                <div className={`px-3 py-0.5 rounded-full border text-[11px] font-medium ${cardBorder} ${
+                  isLight ? 'bg-black/5 text-[#6B7280]' : 'bg-white/[0.04] text-[#888]'
+                }`}>
+                  {group.dateLabel}
+                </div>
+              </div>
 
+              {/* Messages list */}
+              <div className="space-y-4">
+                {group.msgs.map((m: any) => (
+                  <MessageBubble key={m.id} message={m} theme={theme} />
+                ))}
+              </div>
+            </div>
+          ))
+        )}
+
+        {/* Real Reasoning Box if model is thinking */}
         {isGenerating && (
           <div className="mt-4">
             {reasoningText && (
-              <div className="mb-3 rounded-[12px] border border-white/[0.06] bg-[#111] overflow-hidden">
-                <button onClick={() => setReasoningOpen(!reasoningOpen)} className="w-full flex items-center justify-between px-3.5 py-2.5 text-[11px] font-medium text-[#888] hover:text-white transition">
-                  <span className="flex items-center gap-2">
-                    <span className="w-4 h-4 rounded-full bg-white/[0.06] flex items-center justify-center">◐</span>
-                    Thought for {reasoningText.match(/[\d.]+/)?.[0] || '2.1'} seconds
+              <div className={`mb-3 rounded-[12px] border overflow-hidden ${
+                isLight ? 'bg-white border-black/10' : 'bg-[#111] border-white/[0.08]'
+              }`}>
+                <button
+                  onClick={() => setReasoningOpen(!reasoningOpen)}
+                  className={`w-full flex items-center justify-between px-3.5 py-2 text-[11px] font-semibold transition ${
+                    isLight ? 'text-[#4B5563] hover:text-black' : 'text-[#AAA] hover:text-white'
+                  }`}
+                >
+                  <span className="flex items-center gap-1.5">
+                    <span>💭 Ход рассуждений модели</span>
                   </span>
                   <span className={`transition-transform ${reasoningOpen ? 'rotate-180' : ''}`}>⌄</span>
                 </button>
                 {reasoningOpen && (
-                  <div className="px-3.5 pb-3 text-[11px] leading-[1.6] text-[#777] border-t border-white/[0.04] pt-2.5 whitespace-pre-wrap">{reasoningText}</div>
+                  <div className={`px-3.5 pb-3 text-[11px] leading-[1.6] border-t whitespace-pre-wrap ${
+                    isLight ? 'text-[#374151] border-black/5' : 'text-[#888] border-white/[0.05]'
+                  }`}>
+                    {reasoningText}
+                  </div>
                 )}
               </div>
             )}
-            <div className="flex items-center gap-2 text-[12px] text-[#666] px-1">
-              <div className="flex gap-1">
-                <span className="w-1.5 h-1.5 rounded-full bg-[#555] animate-bounce" style={{ animationDelay: '0ms' }} />
-                <span className="w-1.5 h-1.5 rounded-full bg-[#555] animate-bounce" style={{ animationDelay: '150ms' }} />
-                <span className="w-1.5 h-1.5 rounded-full bg-[#555] animate-bounce" style={{ animationDelay: '300ms' }} />
-              </div>
-              <span className="font-medium">{typingLabel}…</span>
-            </div>
           </div>
         )}
-        <div className="h-4" />
       </div>
 
-      <InputBar onSend={handleSend} disabled={isGenerating} chatId={activeChatId} showFilesToggle={!!setShowFiles} showFiles={!!showFiles} onToggleFiles={() => setShowFiles && setShowFiles(!showFiles)} />
+      {/* Input Bar */}
+      <InputBar
+        onSend={handleSend}
+        disabled={isGenerating}
+        chatId={activeChatId}
+        theme={theme}
+        showFilesToggle={!!setShowFiles}
+        showFiles={!!showFiles}
+        onToggleFiles={() => setShowFiles && setShowFiles(!showFiles)}
+      />
     </div>
   )
 }

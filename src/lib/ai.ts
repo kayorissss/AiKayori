@@ -1,224 +1,457 @@
-// AI-KAYORI v5.0 - REAL AI, no templates, reasoning like DeepSeek
+// AI-KAYORI - Real AI Engine (Google Gemini, Cloudflare Workers AI, OpenAI / Groq / OpenRouter)
 import { MODELS, ModelId } from './version'
-import { getSetting } from './storage'
+import { getSetting, saveSetting } from './storage'
 
-const _gParts = ['AQ.Ab8R','N6I0Wz8P','S2tyrb','bnfPwD2','jpNQmh','qqmVcn','D7lubd','R2Ui5u','Q']
-const _cfParts = ['cfut_p','jlsrHC','TUOchy','cZa63B','n9uR1R','d9HMsn','X3h5TN','gPI015','81b0e']
-const BASE_GOOGLE_KEY = _gParts.join('')
-const BASE_CF_TOKEN = _cfParts.join('')
+export interface ApiKeysConfig {
+  google: string
+  cfAccount: string
+  cfToken: string
+  openaiKey: string
+  openaiUrl: string
+  openaiModel: string
+}
 
-async function getKeys() {
-  const customGoogle = await getSetting<string>('custom-google-key')
-  const customCfToken = await getSetting<string>('custom-cf-token')
-  const customCfAccount = await getSetting<string>('custom-cf-account')
+export type AiMessage = {
+  role: 'user' | 'assistant' | 'system'
+  content: string
+}
+
+export async function getKeys(): Promise<ApiKeysConfig> {
+  const customGoogle = (await getSetting<string>('custom-google-key')) || localStorage.getItem('custom-google-key') || ''
+  const customCfToken = (await getSetting<string>('custom-cf-token')) || localStorage.getItem('custom-cf-token') || ''
+  const customCfAccount = (await getSetting<string>('custom-cf-account')) || localStorage.getItem('custom-cf-account') || ''
+  const customOpenaiKey = (await getSetting<string>('custom-openai-key')) || localStorage.getItem('custom-openai-key') || ''
+  const customOpenaiUrl = (await getSetting<string>('custom-openai-url')) || localStorage.getItem('custom-openai-url') || 'https://api.openai.com/v1'
+  const customOpenaiModel = (await getSetting<string>('custom-openai-model')) || localStorage.getItem('custom-openai-model') || 'gpt-4o-mini'
+
   const envGoogle = import.meta.env.VITE_GOOGLE_API_KEY || ''
   const envCfAccount = import.meta.env.VITE_CF_ACCOUNT_ID || ''
   const envCfToken = import.meta.env.VITE_CF_API_TOKEN || ''
+  const envOpenaiKey = import.meta.env.VITE_OPENAI_API_KEY || ''
+
   return {
-    google: customGoogle || envGoogle || BASE_GOOGLE_KEY,
-    cfAccount: customCfAccount || envCfAccount || '',
-    cfToken: customCfToken || envCfToken || BASE_CF_TOKEN
+    google: customGoogle || envGoogle,
+    cfAccount: customCfAccount || envCfAccount,
+    cfToken: customCfToken || envCfToken,
+    openaiKey: customOpenaiKey || envOpenaiKey,
+    openaiUrl: customOpenaiUrl.replace(/\/+$/, ''),
+    openaiModel: customOpenaiModel
   }
 }
 
-type AiMessage = { role: 'user' | 'assistant' | 'system', content: string }
+export async function saveKeys(keys: Partial<ApiKeysConfig>) {
+  if (keys.google !== undefined) {
+    await saveSetting('custom-google-key', keys.google.trim())
+    localStorage.setItem('custom-google-key', keys.google.trim())
+  }
+  if (keys.cfAccount !== undefined) {
+    await saveSetting('custom-cf-account', keys.cfAccount.trim())
+    localStorage.setItem('custom-cf-account', keys.cfAccount.trim())
+  }
+  if (keys.cfToken !== undefined) {
+    await saveSetting('custom-cf-token', keys.cfToken.trim())
+    localStorage.setItem('custom-cf-token', keys.cfToken.trim())
+  }
+  if (keys.openaiKey !== undefined) {
+    await saveSetting('custom-openai-key', keys.openaiKey.trim())
+    localStorage.setItem('custom-openai-key', keys.openaiKey.trim())
+  }
+  if (keys.openaiUrl !== undefined) {
+    await saveSetting('custom-openai-url', keys.openaiUrl.trim())
+    localStorage.setItem('custom-openai-url', keys.openaiUrl.trim())
+  }
+  if (keys.openaiModel !== undefined) {
+    await saveSetting('custom-openai-model', keys.openaiModel.trim())
+    localStorage.setItem('custom-openai-model', keys.openaiModel.trim())
+  }
+}
+
+// Key verification tests
+export async function testGoogleKey(key: string): Promise<{ ok: boolean; message: string }> {
+  const trimmed = key.trim()
+  if (!trimmed) return { ok: false, message: 'Ключ пустой' }
+  try {
+    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${trimmed}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: [{ role: 'user', parts: [{ text: 'Ответь одним словом: "ОК"' }] }],
+        generationConfig: { maxOutputTokens: 10 }
+      })
+    })
+    const data = await res.json()
+    if (!res.ok) {
+      const err = data.error?.message || `Ошибка HTTP ${res.status}`
+      return { ok: false, message: err }
+    }
+    const text = data.candidates?.[0]?.content?.parts?.[0]?.text || 'Подключено'
+    return { ok: true, message: `Успешно! Ответ модели: ${text.trim()}` }
+  } catch (e: any) {
+    return { ok: false, message: e.message || 'Ошибка сети' }
+  }
+}
+
+export async function testOpenAIKey(key: string, baseUrl: string = 'https://api.openai.com/v1', model: string = 'gpt-4o-mini'): Promise<{ ok: boolean; message: string }> {
+  const trimmed = key.trim()
+  if (!trimmed) return { ok: false, message: 'Ключ пустой' }
+  const cleanUrl = baseUrl.trim().replace(/\/+$/, '')
+  try {
+    const res = await fetch(`${cleanUrl}/chat/completions`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${trimmed}`
+      },
+      body: JSON.stringify({
+        model: model.trim() || 'gpt-4o-mini',
+        messages: [{ role: 'user', content: 'Ответь "ОК"' }],
+        max_tokens: 10
+      })
+    })
+    const data = await res.json()
+    if (!res.ok) {
+      const err = data.error?.message || `Ошибка HTTP ${res.status}`
+      return { ok: false, message: err }
+    }
+    const text = data.choices?.[0]?.message?.content || 'Подключено'
+    return { ok: true, message: `Успешно! Ответ модели: ${text.trim()}` }
+  } catch (e: any) {
+    return { ok: false, message: e.message || 'Ошибка сети' }
+  }
+}
+
+export async function testCloudflareKey(account: string, token: string): Promise<{ ok: boolean; message: string }> {
+  const acc = account.trim()
+  const tok = token.trim()
+  if (!acc || !tok) return { ok: false, message: 'Укажите Account ID и API Token' }
+  try {
+    const res = await fetch(`https://api.cloudflare.com/client/v4/accounts/${acc}/ai/run/@cf/meta/llama-3.1-8b-instruct`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${tok}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        messages: [{ role: 'user', content: 'Say OK' }],
+        max_tokens: 10
+      })
+    })
+    const data = await res.json()
+    if (!res.ok || data.success === false) {
+      const err = data.errors?.[0]?.message || data.error || `Ошибка HTTP ${res.status}`
+      return { ok: false, message: err }
+    }
+    const text = data.result?.response || 'Подключено'
+    return { ok: true, message: `Успешно! Ответ: ${String(text).slice(0, 50)}` }
+  } catch (e: any) {
+    return { ok: false, message: e.message || 'Ошибка сети' }
+  }
+}
 
 function isForbiddenQuery(text: string): boolean {
   return /(детская порнография|child porn|cp\s)/i.test(text)
 }
 
-function answerWhyHotCold(prompt: string): string | null {
-  const l = prompt.toLowerCase()
-  if (!((l.includes('жарко') && l.includes('холодно')) || (l.includes('под одеялом') && (l.includes('ноги') || l.includes('холодно'))) || l.includes('сигаево') && l.includes('отопления'))) return null
-  return `Тут чистая физика тела.
+// Convert conversation messages into Google Gemini contents format
+function prepareGeminiContents(messages: AiMessage[], imageBase64?: string) {
+  const filtered = messages.filter(m => m.role !== 'system')
+  const contents: Array<{ role: 'user' | 'model'; parts: Array<any> }> = []
 
-Под одеялом ты в термосе — одеяло держит тепло, между телом и тканью воздух прогревается до +28..+32°C, влажность выше, испарение меньше, поэтому комфортно. Высунул ноги — резкая теплоотдача: в комнате без отопления у тебя в Сигаево сейчас на улице +3°, внутри +14..+18° если батареи не дали, воздух сухой и холодный, сосуды на стопах сужаются, рецепторы холода срабатывают мгновенно.
+  for (let i = 0; i < filtered.length; i++) {
+    const msg = filtered[i]
+    const role: 'user' | 'model' = msg.role === 'assistant' ? 'model' : 'user'
 
-Почему другу жарко в той же комнате:
-
-1. **Метаболизм.** У кого-то базовый обмен выше — больше тепла. После еды, кофе, стресса — тоже жарче.
-2. **Масса и мышцы.** Больше мышц — больше теплопродукции.
-3. **Одежда.** Ты под одеялом, он может в футболке.
-4. **Влажность.** Без отопления влажность 70%+ — при высокой влажности тепло ощущается сильнее.
-5. **Акклиматизация и щитовидка.** Если ему постоянно жарко, потливость — стоит проверить ТТГ, Т4. Гипертиреоз дает такую картину.
-
-Что сделать сейчас:
-- Ноги в носки, второе одеяло именно на ноги.
-- Проветривай по 5 мин, а не настежь час.
-- Теплый чай, не горячий — от горячего потом еще холоднее.
-- Если есть масляный обогреватель — на 1-2, не у головы.
-- Стыки окон заклей — в Сигаево с +3° за бортом дует сильно.
-
-Если у друга жарко постоянно + сердцебиение — к терапевту.`
-}
-
-function answerWeather(prompt: string): string | null {
-  const l = prompt.toLowerCase()
-  if (!l.includes('погода')) return null
-  let city = 'Сигаево'
-  if (l.includes('сарапул')) city = 'Сарапуле'
-  if (l.includes('ижевск')) city = 'Ижевске'
-  if (l.includes('москв')) city = 'Москве'
-  const m = prompt.match(/погода\s+(?:в\s+)?([А-Яа-яЁёA-Za-z\- ]{3,30})/i)
-  if (m && m[1]) {
-    const c = m[1].trim().replace(/сейчас|сегодня|какая|там/gi,'').trim()
-    if (c.length > 2 && c.length < 25) city = c
-  }
-  const temp = Math.floor(Math.random()*6)+1
-  return `В ${city} сейчас +${temp}°C, ${['облачно с прояснениями','пасмурно','небольшой дождь'][Math.floor(Math.random()*3)]}. Днём +${temp+4}°, ночью +${temp-2}°, ветер западный 3-5 м/с, влажность 82%. Без отопления в комнате будет +15..+18° — одевайся теплее, ноги в тепле держи.`
-}
-
-function answerGeneral(prompt: string, history: AiMessage[]): string {
-  const l = prompt.toLowerCase().trim()
-  if (l.length < 4) return `Привет! Что нужно сделать?`
-  if (l.includes('как дела')) return `Норм, работаю. У тебя как? Чем помочь?`
-  if (l.includes('кто ты') || l.includes('что ты')) return `Я Kayori — локальный ассистент в AI-KAYORI. Помню чат, вижу файлы и фото, могу код. Спроси прямо.`
-  if (l.includes('что такое') ) {
-    const term = prompt.replace(/что такое/gi,'').replace(/\?/g,'').trim().slice(0,40)
-    if (term.length > 1) return `${term} — если коротко: это ${term.length < 12 ? 'понятие' : 'штука'} из контекста. Дай пример где встретил — объясню по делу, без википедии.`
-  }
-  const lastUser = [...history].reverse().find(m => m.role === 'user' && m.content !== prompt)
-  if (l.length < 28 && lastUser) {
-    return `Ты про "${lastUser.content.slice(0,70)}"? Уточни что именно — отвечу сразу.`
-  }
-  return `${prompt.slice(0,140)} — понял задачу. Отвечаю по делу: ${history.length > 4 ? `помню контекст (${history.length} сообщений)` : ''} Дай деталей если нужно глубже, а так готов помочь.`
-}
-
-function genCodeFromPrompt(prompt: string): { code: string, fileName: string } | null {
-  const lower = prompt.toLowerCase()
-  if (!lower.includes('html') && !lower.includes('кликер') && !lower.includes('калькулятор') && !lower.includes('динозавр') && !lower.includes('игра')) return null
-  const extractName = () => {
-    const m = prompt.match(/сохрани как `([^`]+)`/i) || prompt.match(/назови\s+([a-z0-9_-]+\.html)/i) || prompt.match(/файл\s+([a-z0-9_-]+\.html)/i)
-    return m ? m[1] : ''
-  }
-  if (lower.includes('динозавр') || lower.includes('dino')) {
-    return {
-      fileName: extractName() || 'dino.html',
-      code: `<!DOCTYPE html><html lang="ru"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Dino Runner</title><style>*{margin:0;padding:0;box-sizing:border-box}body{background:#f7f7f7;font-family:monospace;display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100vh}.hud{margin-bottom:12px;font-size:14px;color:#535353}.game{width:600px;max-width:92vw;height:200px;border:2px solid #535353;position:relative;overflow:hidden;background:#fff}.dino{width:44px;height:47px;background:#535353;position:absolute;bottom:0;left:30px;border-radius:2px}.dino.jump{animation:jump .6s}@keyframes jump{0%{bottom:0}50%{bottom:90px}100%{bottom:0}}.cactus{width:22px;height:46px;background:#535353;position:absolute;bottom:0;border-radius:2px}.ground{position:absolute;bottom:0;width:100%;height:2px;background:#535353}.hint{margin-top:10px;color:#888;font-size:12px}</style></head><body><div class="hud">Score: <span id="score">0</span> | Press Space / Tap</div><div class="game" id="game"><div class="dino" id="dino"></div><div class="ground"></div></div><div class="hint">Пробел — прыжок, клик — старт</div><script>const d=document.getElementById('dino'),g=document.getElementById('game'),s=document.getElementById('score');let score=0,playing=false,jumping=false,obs=[];function jump(){if(jumping)return;jumping=true;d.classList.add('jump');setTimeout(()=>{d.classList.remove('jump');jumping=false},600)}function spawn(){if(!playing)return;const c=document.createElement('div');c.className='cactus';c.style.left='600px';g.appendChild(c);obs.push(c);setTimeout(spawn,1200+Math.random()*600)}function loop(){if(!playing)return;obs.forEach((c,i)=>{let l=parseInt(c.style.left)||600;l-=6;c.style.left=l+'px';if(l<-30){c.remove();obs.splice(i,1);score++;s.textContent=score}let dR=d.getBoundingClientRect(),cR=c.getBoundingClientRect();if(!(dR.right<cR.left||dR.left>cR.right||dR.bottom<cR.top||dR.top>cR.bottom)){if(!jumping){playing=false;alert('Game Over! Score:'+score)}}});requestAnimationFrame(loop)}function start(){if(playing){jump();return}playing=true;score=0;s.textContent=0;obs.forEach(o=>o.remove());obs=[];spawn();loop()}document.addEventListener('keydown',e=>{if(e.code==='Space'){e.preventDefault();start();if(playing)jump()}});g.addEventListener('click',start);</script></body></html>`
+    // Gemini requires strict alternating user/model turns
+    if (contents.length > 0 && contents[contents.length - 1].role === role) {
+      contents[contents.length - 1].parts.push({ text: msg.content })
+    } else {
+      contents.push({
+        role,
+        parts: [{ text: msg.content || ' ' }]
+      })
     }
   }
-  if (lower.includes('кликер')) {
-    return {
-      fileName: extractName() || 'clicker.html',
-      code: `<!DOCTYPE html><html lang="ru"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Clicker</title><style>body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;background:#080808;color:#fff;font-family:system-ui}.card{background:#141414;border:1px solid #222;border-radius:24px;padding:32px;width:340px;text-align:center}.num{font-size:64px;font-weight:800;margin:12px 0}.btn{width:100%;padding:16px;border-radius:999px;border:none;background:#fff;color:#000;font-weight:700;font-size:16px;cursor:pointer}.shop{margin-top:16px;display:grid;gap:8px} .shop button{background:#1e1e1e;color:#fff;border:1px solid #222;border-radius:12px;padding:10px;font-size:12px}</style></head><body><div class="card"><div style="color:#666;font-size:12px">CLICKER</div><div class="num" id="n">0</div><button class="btn" id="b">Клик +1</button><div class="shop"><button id="a">Авто-клик 50</button><button id="x2">x2 за 200</button></div></div><script>let c=0,auto=0,mult=1;const el=document.getElementById('n');function upd(){el.textContent=c}document.getElementById('b').onclick=()=>{c+=mult;upd()};document.getElementById('a').onclick=()=>{if(c>=50){c-=50;auto++;upd()}};document.getElementById('x2').onclick=()=>{if(c>=200){c-=200;mult*=2;upd()}};setInterval(()=>{if(auto){c+=auto*mult;upd()}},1000)</script></body></html>`
-    }
-  }
-  if (lower.includes('калькулятор')) {
-    return {
-      fileName: extractName() || 'calculator.html',
-      code: `<!DOCTYPE html><html lang="ru"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Calculator</title><style>body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;background:#0a0a0a;color:#fff;font-family:system-ui}.calc{background:#141414;border:1px solid #222;border-radius:20px;padding:18px;width:300px}.disp{background:#0a0a0a;border:1px solid #222;border-radius:12px;padding:14px;text-align:right;font-size:28px;min-height:56px;overflow:hidden}.grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:12px}button{height:52px;border-radius:12px;border:1px solid #222;background:#1e1e1e;color:#fff;font-size:16px;cursor:pointer}button.op{background:#222}button.eq{background:#fff;color:#000;font-weight:700}</style></head><body><div class="calc"><div class="disp" id="d">0</div><div class="grid"><button onclick="c()">C</button><button onclick="a('(')">(</button><button onclick="a(')')">)</button><button class="op" onclick="a('/')">÷</button><button onclick="a('7')">7</button><button onclick="a('8')">8</button><button onclick="a('9')">9</button><button class="op" onclick="a('*')">×</button><button onclick="a('4')">4</button><button onclick="a('5')">5</button><button onclick="a('6')">6</button><button class="op" onclick="a('-')">-</button><button onclick="a('1')">1</button><button onclick="a('2')">2</button><button onclick="a('3')">3</button><button class="op" onclick="a('+')">+</button><button onclick="a('0')">0</button><button onclick="a('.')">.</button><button onclick="b()">⌫</button><button class="eq" onclick="e()">=</button></div></div><script>let s='';const D=document.getElementById('d');function u(){D.textContent=s||'0'}function a(v){s+=v;u()}function c(){s='';u()}function b(){s=s.slice(0,-1);u()}function e(){try{s=String(eval(s));u()}catch{s='err';u();s=''}}u()</script></body></html>`
-    }
-  }
-  let topic = prompt.replace(/создай|сделай|напиши|html|страницу|код|сайт/gi,'').trim().slice(0,50) || 'page'
-  const safe = topic.toLowerCase().replace(/[^a-z0-9_-]/g,'-').slice(0,20) || 'index'
-  return {
-    fileName: extractName() || `${safe}.html`,
-    code: `<!DOCTYPE html><html lang="ru"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>${topic}</title><style>body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;background:#0a0a0a;color:#fff;font-family:system-ui;padding:20px}.card{background:#141414;border:1px solid #222;border-radius:20px;padding:32px;max-width:520px;width:100%;text-align:center}h1{font-size:22px;margin:0 0 10px}p{color:#888;font-size:14px}</style></head><body><div class="card"><h1>${topic}</h1><p>Готово. Скажи что добавить — сделаю.</p></div></body></html>`
-  }
-}
 
-function smartMock(history: AiMessage[], prompt: string, modelKey: ModelId, opts?: { imageBase64?: string, fileContent?: string, fileName?: string }): string {
-  const why = answerWhyHotCold(prompt)
-  if (why) return why
-  const weather = answerWeather(prompt)
-  if (weather) return weather
-  if (opts?.imageBase64) {
-    const l = prompt.toLowerCase()
-    if (l.includes('что тут') || l.includes('что написано') || l.includes('что на фото') || prompt.length < 30) {
-      return `На фото вижу баннер: синий фон с кристаллами/бабочками, аниме-персонаж, надпись "t.me/kayor1sss". Яркий стиль, похоже на промо канала. Если нужно — могу прочитать текст точнее или описать детали.`
-    }
-    return `Вижу изображение. Что с ним сделать?`
+  // Ensure first turn is user
+  if (contents.length > 0 && contents[0].role !== 'user') {
+    contents.unshift({ role: 'user', parts: [{ text: 'Привет' }] })
   }
-  if ((prompt.toLowerCase().includes('что это') || prompt.toLowerCase().includes('чо там')) && (opts?.fileName || opts?.fileContent)) {
-    const len = opts.fileContent?.length || 0
-    return `Это файл ${opts.fileName || 'без имени'} — ${len} символов. ${opts.fileName?.endsWith('.html') ? 'HTML-страница' : 'Текстовый файл'}. Содержит: ${(opts.fileContent || '').slice(0,300)}... Что именно нужно?`
-  }
-  const code = genCodeFromPrompt(prompt)
-  if (code) {
-    return `Готово — сохрани как \`${code.fileName}\`:\n\n\`\`\`html\n${code.code}\n\`\`\``
-  }
-  if (prompt.toLowerCase().length < 30) {
-    const last = [...history].reverse().find(m => m.role === 'user' && m.content !== prompt && m.content.length > 10)
-    if (last) return `Ты про "${last.content.slice(0,80)}"? Уточни — отвечу сразу.`
-  }
-  return answerGeneral(prompt, history)
-}
 
-export async function callGoogleGemini(messages: AiMessage[], imageBase64?: string): Promise<string> {
-  const { google } = await getKeys()
-  if (!google) return smartMock(messages.slice(0,-1), messages[messages.length-1]?.content || '', 'google' as ModelId, { imageBase64 })
-
-  const contents = messages.filter(m => m.role !== 'system').map(m => ({
-    role: m.role === 'assistant' ? 'model' : 'user',
-    parts: [{ text: m.content }]
-  }))
+  // Attach image to the last user message
   if (imageBase64 && contents.length > 0) {
-    const last = contents[contents.length-1] as any
-    last.parts.push({ inline_data: { mime_type: 'image/jpeg', data: imageBase64.split(',')[1] || imageBase64 } })
+    let lastUserIndex = -1
+    for (let i = contents.length - 1; i >= 0; i--) {
+      if (contents[i].role === 'user') {
+        lastUserIndex = i
+        break
+      }
+    }
+    if (lastUserIndex !== -1) {
+      let mimeType = 'image/jpeg'
+      let base64Data = imageBase64
+      if (imageBase64.startsWith('data:')) {
+        const matches = imageBase64.match(/^data:([^;]+);base64,(.+)$/)
+        if (matches) {
+          mimeType = matches[1]
+          base64Data = matches[2]
+        }
+      }
+      contents[lastUserIndex].parts.push({
+        inlineData: {
+          mimeType,
+          data: base64Data
+        }
+      })
+    }
   }
+
+  return contents
+}
+
+export async function callGoogleGemini(
+  modelId: string,
+  messages: AiMessage[],
+  imageBase64?: string
+): Promise<string> {
+  const { google } = await getKeys()
+  if (!google) {
+    throw new Error(
+      'MISSING_GOOGLE_KEY: Не указан API ключ Google Gemini. Перейдите в «Настройки» → «API Ключи» и вставьте ваш ключ Google AI Studio (он бесплатный: https://aistudio.google.com/app/apikey).'
+    )
+  }
+
+  const contents = prepareGeminiContents(messages, imageBase64)
+  const realModel = modelId.includes('pro') ? 'gemini-1.5-pro' : 'gemini-1.5-flash'
 
   const body = {
     contents,
-    generationConfig: { temperature: 0.85, maxOutputTokens: 4096 },
-    systemInstruction: { parts: [{ text: `Ты Kayori. Отвечай прямо, по делу, без шаблонов "Понял тебя". Не пиши дату. Помни историю чата. Если просят код - дай код. Если файл - анализируй файл. Будь полезным.` }] }
+    generationConfig: {
+      temperature: 0.7,
+      maxOutputTokens: 4096
+    },
+    systemInstruction: {
+      parts: [
+        {
+          text: 'Ты Kayori — умный, дружелюбный и компетентный AI ассистент. Отвечай подробно, по делу, грамотно оформляй код в markdown с указанием языка. Помогай пользователю решать реальные задачи.'
+        }
+      ]
+    }
   }
 
-  const urls = [
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${google}`,
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${google}`,
-  ]
-  for (const url of urls) {
-    try {
-      const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
-      if (!res.ok) continue
-      const data = await res.json()
-      const text = data.candidates?.[0]?.content?.parts?.[0]?.text
-      if (text && text.length > 5) return text
-    } catch {}
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${realModel}:generateContent?key=${google}`
+
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  })
+
+  const data = await res.json()
+
+  if (!res.ok) {
+    const errorMsg = data.error?.message || `Google API Error: HTTP ${res.status}`
+    if (res.status === 400 && errorMsg.includes('API key not valid')) {
+      throw new Error(
+        `INVALID_GOOGLE_KEY: Введённый API ключ Google Gemini недействителен. Проверьте ключ в Настройках приложения (https://aistudio.google.com/app/apikey).`
+      )
+    }
+    if (res.status === 429) {
+      throw new Error(`QUOTA_EXCEEDED: Превышен лимит запросов к Google Gemini API. Попробуйте снова через минуту.`)
+    }
+    throw new Error(`Ошибка Google Gemini: ${errorMsg}`)
   }
-  return smartMock(messages.slice(0,-1), messages[messages.length-1]?.content || '', 'google' as ModelId, { imageBase64 })
+
+  const candidate = data.candidates?.[0]
+  if (candidate?.finishReason === 'SAFETY') {
+    return 'Запрос заблокирован фильтром безопасности Google Gemini.'
+  }
+
+  const text = candidate?.content?.parts?.[0]?.text
+  if (!text) {
+    throw new Error('Модель Google Gemini вернула пустой ответ.')
+  }
+
+  return text
 }
 
-export async function callCloudflare(modelId: string, messages: AiMessage[], modelKey: ModelId): Promise<string> {
-  const { cfAccount, cfToken } = await getKeys()
-  if (!cfAccount || !cfToken) return callGoogleGemini(messages)
-  try {
-    const res = await fetch(`https://api.cloudflare.com/client/v4/accounts/${cfAccount}/ai/run/${modelId}`, {
-      method: 'POST',
-      headers: { 'Authorization': `Bearer ${cfToken}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ messages: messages.map(m => ({ role: m.role, content: m.content })), max_tokens: 2048 })
+export async function callOpenAICompatible(
+  messages: AiMessage[],
+  opts?: { imageBase64?: string; fileContent?: string; fileName?: string }
+): Promise<{ text: string; reasoning?: string }> {
+  const { openaiKey, openaiUrl, openaiModel } = await getKeys()
+  if (!openaiKey) {
+    throw new Error(
+      'MISSING_OPENAI_KEY: Не указан API ключ для OpenAI-совместимого провайдера (Groq, OpenAI, OpenRouter, DeepSeek). Укажите его в «Настройках» → «API Ключи».'
+    )
+  }
+
+  const formattedMessages: any[] = []
+
+  // System instruction
+  formattedMessages.push({
+    role: 'system',
+    content:
+      'Ты Kayori — профессиональный, полезный AI ассистент. Отвечай информативно, логично и вежливо. Используй красивый Markdown с разметкой для кода.'
+  })
+
+  for (let i = 0; i < messages.length; i++) {
+    const m = messages[i]
+    if (m.role === 'system') continue
+
+    // For the last user message, attach image or file if present
+    if (i === messages.length - 1 && m.role === 'user' && (opts?.imageBase64 || opts?.fileContent)) {
+      if (opts.imageBase64) {
+        formattedMessages.push({
+          role: 'user',
+          content: [
+            { type: 'text', text: m.content || 'Что на этом изображении?' },
+            {
+              type: 'image_url',
+              image_url: {
+                url: opts.imageBase64.startsWith('data:') ? opts.imageBase64 : `data:image/jpeg;base64,${opts.imageBase64}`
+              }
+            }
+          ]
+        })
+      } else if (opts.fileContent) {
+        formattedMessages.push({
+          role: 'user',
+          content: `${m.content}\n\n[Прикрепленный файл: ${opts.fileName || 'file'}]:\n${opts.fileContent.slice(0, 12000)}`
+        })
+      }
+    } else {
+      formattedMessages.push({
+        role: m.role,
+        content: m.content
+      })
+    }
+  }
+
+  const res = await fetch(`${openaiUrl}/chat/completions`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${openaiKey}`
+    },
+    body: JSON.stringify({
+      model: openaiModel || 'gpt-4o-mini',
+      messages: formattedMessages,
+      temperature: 0.7,
+      max_tokens: 4096
     })
-    if (!res.ok) throw new Error()
-    const data = await res.json()
-    const text = data.result?.response || data.result?.output || (typeof data.result === 'string' ? data.result : '')
-    if (text) return text
-    throw new Error()
-  } catch {
-    return callGoogleGemini(messages)
+  })
+
+  const data = await res.json()
+
+  if (!res.ok) {
+    const errMsg = data.error?.message || data.message || `HTTP ${res.status}`
+    throw new Error(`Ошибка API (${openaiModel}): ${errMsg}`)
   }
+
+  const choice = data.choices?.[0]
+  const text = choice?.message?.content || ''
+  const reasoning = choice?.message?.reasoning_content || undefined
+
+  if (!text && !reasoning) {
+    throw new Error('Модель вернула пустой ответ.')
+  }
+
+  return { text: text || (reasoning ? 'Размышления завершены.' : ''), reasoning }
 }
 
-export async function chatCompletion(modelKey: ModelId, messages: AiMessage[], opts?: { imageBase64?: string, fileContent?: string, fileName?: string }): Promise<{ text: string, modelInfo: typeof MODELS[ModelId], reasoning?: string }> {
-  const lastText = messages[messages.length-1]?.content || ''
-  if (isForbiddenQuery(lastText)) return { text: `Не могу помочь с этим запросом.`, modelInfo: MODELS[modelKey] }
+export async function callCloudflare(modelId: string, messages: AiMessage[]): Promise<string> {
+  const { cfAccount, cfToken } = await getKeys()
+  if (!cfAccount || !cfToken) {
+    throw new Error(
+      'MISSING_CLOUDFLARE_CREDENTIALS: Для работы моделей Cloudflare (Llama, Mistral, Qwen) укажите Cloudflare Account ID и API Token в «Настройках» → «API Ключи». Либо переключитесь на Google Gemini или Custom API.'
+    )
+  }
 
-  const reasoning = `Думаю ${ (Math.random()*2+0.8).toFixed(1)} сек… Анализирую: "${lastText.slice(0,60)}" | История: ${messages.length} | Модель: ${modelKey} ${opts?.imageBase64 ? '| Фото' : ''} ${opts?.fileName ? `| Файл ${opts.fileName}` : ''}\nРассматриваю контекст, проверяю прошлые сообщения, формирую ответ по делу без шаблонов.`
+  const res = await fetch(`https://api.cloudflare.com/client/v4/accounts/${cfAccount}/ai/run/${modelId}`, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${cfToken}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      messages: messages.map(m => ({ role: m.role, content: m.content })),
+      max_tokens: 3072
+    })
+  })
+
+  const data = await res.json()
+
+  if (!res.ok || data.success === false) {
+    const err = data.errors?.[0]?.message || data.error || `HTTP ${res.status}`
+    throw new Error(`Ошибка Cloudflare Workers AI: ${err}`)
+  }
+
+  const text = data.result?.response || data.result?.output || (typeof data.result === 'string' ? data.result : '')
+  if (!text) {
+    throw new Error('Cloudflare AI вернул пустой результат.')
+  }
+  return text
+}
+
+export async function chatCompletion(
+  modelKey: ModelId,
+  messages: AiMessage[],
+  opts?: { imageBase64?: string; fileContent?: string; fileName?: string }
+): Promise<{ text: string; modelInfo: (typeof MODELS)[ModelId]; reasoning?: string }> {
+  const lastText = messages[messages.length - 1]?.content || ''
+  if (isForbiddenQuery(lastText)) {
+    return {
+      text: 'Извините, я не могу обработать данный запрос, так как он нарушает политику безопасности.',
+      modelInfo: MODELS[modelKey]
+    }
+  }
+
+  const keys = await getKeys()
+
+  // Format message history with file content if present
+  let msgs = [...messages]
+  if (opts?.fileContent && modelKey !== 'custom' && modelKey !== 'google' && modelKey !== 'geminiPro') {
+    msgs[msgs.length - 1] = {
+      ...msgs[msgs.length - 1],
+      content: `${msgs[msgs.length - 1].content}\n\n[Файл: ${opts.fileName || ''}]:\n${opts.fileContent.slice(0, 8000)}`
+    }
+  }
 
   let text = ''
-  if (modelKey === 'google') {
-    text = await callGoogleGemini(messages, opts?.imageBase64)
-  } else {
-    let msgs = [...messages]
-    if (opts?.fileContent) {
-      msgs[msgs.length-1] = { ...msgs[msgs.length-1], content: `${msgs[msgs.length-1].content}\n\n[Файл ${opts.fileName || ''}]:\n${opts.fileContent.slice(0,8000)}` }
+  let reasoning: string | undefined = undefined
+
+  // Route according to model choice
+  if (modelKey === 'google' || modelKey === 'geminiPro') {
+    // If user has no Google key, but configured OpenAI/Groq, inform or seamlessly fallback
+    if (!keys.google && keys.openaiKey) {
+      const res = await callOpenAICompatible(messages, opts)
+      return {
+        text: `> *Ответ получен через ${keys.openaiModel || 'OpenAI API'} (ключ Google Gemini не был указан)*\n\n${res.text}`,
+        modelInfo: MODELS[modelKey],
+        reasoning: res.reasoning
+      }
     }
-    const cfModelId = MODELS[modelKey].id
-    text = await callCloudflare(cfModelId, msgs, modelKey)
-    if (!text || text.length < 5) {
-      text = smartMock(msgs.slice(0,-1), lastText, modelKey, { imageBase64: opts?.imageBase64, fileContent: opts?.fileContent, fileName: opts?.fileName })
+    const modelConfig = MODELS[modelKey]
+    text = await callGoogleGemini(modelConfig.id, msgs, opts?.imageBase64)
+  } else if (modelKey === 'custom') {
+    const res = await callOpenAICompatible(messages, opts)
+    text = res.text
+    reasoning = res.reasoning
+  } else {
+    // Cloudflare models (llama31, llama3, mistral, qwen)
+    if ((!keys.cfAccount || !keys.cfToken) && keys.google) {
+      // If Cloudflare is not configured but Google is configured, use Gemini to answer
+      text = await callGoogleGemini('gemini-1.5-flash', msgs, opts?.imageBase64)
+    } else if ((!keys.cfAccount || !keys.cfToken) && keys.openaiKey) {
+      // Or use OpenAI
+      const res = await callOpenAICompatible(messages, opts)
+      text = res.text
+      reasoning = res.reasoning
+    } else {
+      const cfModelId = MODELS[modelKey].id
+      text = await callCloudflare(cfModelId, msgs)
     }
   }
-  if (!text) text = smartMock(messages.slice(0,-1), lastText, modelKey, opts)
 
   return { text, modelInfo: MODELS[modelKey], reasoning }
 }
@@ -227,13 +460,18 @@ export async function generateImageCloudflare(prompt: string): Promise<string | 
   const { cfAccount, cfToken } = await getKeys()
   if (!cfAccount || !cfToken) return null
   try {
-    const res = await fetch(`https://api.cloudflare.com/client/v4/accounts/${cfAccount}/ai/run/@cf/stabilityai/stable-diffusion-xl-base-1.0`, {
-      method: 'POST',
-      headers: { 'Authorization': `Bearer ${cfToken}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ prompt })
-    })
+    const res = await fetch(
+      `https://api.cloudflare.com/client/v4/accounts/${cfAccount}/ai/run/@cf/stabilityai/stable-diffusion-xl-base-1.0`,
+      {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${cfToken}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt })
+      }
+    )
     if (!res.ok) return null
     const blob = await res.blob()
     return URL.createObjectURL(blob)
-  } catch { return null }
+  } catch {
+    return null
+  }
 }

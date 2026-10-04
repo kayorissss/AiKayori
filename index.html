@@ -15,23 +15,22 @@
     <link href="https://fonts.googleapis.com/css2?family=Unbounded:wght@500;600;700;800&family=Manrope:wght@500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
     <link href="https://fonts.cdnfonts.com/css/gotham" rel="stylesheet">
     <style>
-      html, body { background: #080808; margin: 0; overscroll-behavior: none; font-family: 'Gotham', 'Manrope', system-ui, sans-serif; font-weight: 500; }
+      html, body { margin: 0; overscroll-behavior: none; font-family: 'Gotham', 'Manrope', system-ui, sans-serif; font-weight: 500; }
+      html.dark, body.dark { background: #080808; color: #FFFFFF; }
+      html.light, body.light { background: #F6F7F9; color: #111827; }
       /* Gotham Medium bold - override */
       body, * { font-family: 'Gotham', 'Manrope', system-ui, sans-serif; }
       h1,h2,h3,b,strong,.font-bold { font-weight: 700 !important; font-family: 'Gotham', sans-serif; }
       .font-medium { font-weight: 500 !important; }
       ::-webkit-scrollbar { width: 5px; height: 5px; }
       ::-webkit-scrollbar-track { background: transparent; }
-      ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.08); border-radius: 10px; }
-      ::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.14); }
-      * { scrollbar-width: thin; scrollbar-color: rgba(255,255,255,0.08) transparent; }
-      /* Liquid glass helpers */
-      .glass { background: rgba(18,18,18,0.7); backdrop-filter: blur(24px); -webkit-backdrop-filter: blur(24px); border: 1px solid rgba(255,255,255,0.06); }
-      .glass-strong { background: rgba(12,12,12,0.85); backdrop-filter: blur(32px); -webkit-backdrop-filter: blur(32px); border: 1px solid rgba(255,255,255,0.08); }
+      ::-webkit-scrollbar-thumb { background: rgba(120,120,120,0.25); border-radius: 10px; }
+      ::-webkit-scrollbar-thumb:hover { background: rgba(120,120,120,0.45); }
+      * { scrollbar-width: thin; scrollbar-color: rgba(120,120,120,0.25) transparent; }
       /* Remove white highlight on focus */
       textarea:focus, input:focus { outline: none !important; box-shadow: none !important; }
       *:focus { outline: none; }
-      ::selection { background: rgba(255,255,255,0.15); }
+      ::selection { background: rgba(66, 133, 244, 0.3); }
     </style>
   </head>
   <body>
