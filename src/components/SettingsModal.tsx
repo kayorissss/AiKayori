@@ -225,7 +225,7 @@ export default function SettingsModal({ open, onClose, theme = 'dark', onToggleT
                 </div>
                 <div className="text-[15px] font-bold">Настройки</div>
                 <span className={`text-[10px] font-mono px-2 py-0.5 rounded-full ${isLight ? 'bg-black/5 text-[#555]' : 'bg-white/[0.06] text-[#888]'}`}>
-                  V5.0.0
+                  V{APP_VERSION}
                 </span>
                 {saveBanner && (
                   <span className="text-[11px] font-semibold text-emerald-500 bg-emerald-500/10 px-2.5 py-0.5 rounded-full">

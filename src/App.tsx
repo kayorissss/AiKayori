@@ -9,6 +9,7 @@ import ImageViewer from '@/components/ImageViewer'
 import { useChatStore } from '@/store/chatStore'
 import { motion, AnimatePresence } from 'framer-motion'
 import { getSetting, saveSetting } from '@/lib/storage'
+import { APP_VERSION } from '@/lib/version'
 
 export default function App() {
   const loadChats = useChatStore(s => s.loadChats)
@@ -138,7 +139,7 @@ export default function App() {
                     isLight ? 'bg-black/5 border-black/10 text-black' : 'bg-white/[0.08] border-white/[0.06] text-white'
                   }`}
                 >
-                  v5.0.0
+                  v{APP_VERSION}
                 </span>
               </div>
             </motion.div>
@@ -147,7 +148,7 @@ export default function App() {
       </AnimatePresence>
 
       {/* Desktop Custom TitleBar */}
-      {!isMobile && <TitleBar theme={theme} version="v5.0.0" />}
+      {!isMobile && <TitleBar theme={theme} version={`v${APP_VERSION}`} />}
 
       {/* Main App Container */}
       <div className={`flex flex-1 overflow-hidden min-h-0 relative z-10 ${isMobile ? 'pt-0' : 'pt-[44px]'}`}>

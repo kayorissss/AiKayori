@@ -1,3 +1,4 @@
+import { APP_VERSION } from '@/lib/version'
 import { useEffect, useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 
@@ -81,7 +82,7 @@ export default function TitleBar({ theme = 'dark', version }: { theme?: string; 
             </span>
           </div>
           <span className={`ml-1.5 text-[9.5px] font-mono px-2 py-0.5 rounded-full border ${borderCol} ${badgeBg}`}>
-            {version || 'V5.0.0'}
+            {version || `V${APP_VERSION}`}
           </span>
         </div>
 

@@ -1,3 +1,4 @@
+import { APP_VERSION } from '@/lib/version'
 import { useChatStore } from '@/store/chatStore'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useMemo, useState, useEffect } from 'react'
@@ -484,7 +485,7 @@ export default function Sidebar({
           </svg>
           <span>Настройки</span>
         </button>
-        <span className={`text-[10px] font-mono pr-2 ${subtextColor}`}>v5.0.0</span>
+        <span className={`text-[10px] font-mono pr-2 ${subtextColor}`}>v{APP_VERSION}</span>
       </div>
     </motion.div>
   )
