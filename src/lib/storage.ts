@@ -7,8 +7,9 @@ export interface ChatMessage {
   timestamp: number
   modelId?: string
   modelName?: string
-  attachments?: { type: 'image' | 'file', url: string, name?: string, content?: string }[]
+  attachments?: { type: 'image' | 'file', url: string, name?: string, content?: string, size?: number }[]
   isGenerating?: boolean
+  reasoning?: string
 }
 
 export interface Chat {
@@ -18,7 +19,8 @@ export interface Chat {
   updatedAt: number
   messages: ChatMessage[]
   modelId: string
-  draft?: string // сохранённый черновик если перешёл в другой чат
+  draft?: string
+  archived?: boolean
 }
 
 interface KayoriDB extends DBSchema {
@@ -37,7 +39,7 @@ let dbPromise: any = null
 
 function getDB() {
   if (!dbPromise) {
-    dbPromise = openDB<KayoriDB>('kayori-db', 2, {
+    dbPromise = openDB<KayoriDB>('kayori-db', 3, {
       upgrade(db, oldVersion) {
         if (oldVersion < 1) {
           const chatStore = db.createObjectStore('chats', { keyPath: 'id' })
@@ -45,10 +47,7 @@ function getDB() {
           db.createObjectStore('settings')
         }
         if (oldVersion < 2) {
-          // ensure settings store exists
-          if (!db.objectStoreNames.contains('settings')) {
-            db.createObjectStore('settings')
-          }
+          if (!db.objectStoreNames.contains('settings')) db.createObjectStore('settings')
         }
       }
     })
@@ -64,7 +63,7 @@ export async function saveChat(chat: Chat) {
 export async function getAllChats(): Promise<Chat[]> {
   const db = await getDB()
   const all = await db.getAllFromIndex('chats', 'by-updated')
-  return all.reverse() // newest first
+  return all.reverse()
 }
 
 export async function getChat(id: string): Promise<Chat | undefined> {
@@ -88,15 +87,14 @@ export async function getSetting<T>(key: string, def?: T): Promise<T | undefined
   return v ?? def
 }
 
-// Draft persistence for input memory
 export async function saveDraft(chatId: string, draft: string) {
+  if (chatId === 'empty' || chatId === 'new') {
+    await saveSetting('global-draft', draft)
+    return
+  }
   const chat = await getChat(chatId)
   if (chat) {
     chat.draft = draft
     await saveChat(chat)
-  }
-  // also global draft for new chat
-  if (chatId === 'new') {
-    await saveSetting('global-draft', draft)
   }
 }

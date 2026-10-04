@@ -13,6 +13,7 @@ interface ChatState {
   setDraft: (d: string) => void
   setModel: (m: ModelId) => void
   loadChats: () => Promise<void>
+  saveChats: () => Promise<void>
   createNewChat: () => string
   setActiveChat: (id: string | null) => void
   addMessage: (chatId: string, msg: ChatMessage) => Promise<void>
@@ -29,7 +30,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   chats: [],
   activeChatId: null,
   isGenerating: false,
-  currentModel: 'google' as ModelId, // default Gemini for best UX
+  currentModel: 'google' as ModelId,
   draft: '',
   searchQuery: '',
 
@@ -42,18 +43,19 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
   loadChats: async () => {
     let chats = await getAllChats()
-    // Fix: clear stale isGenerating flags that cause "печатает" forever
     chats = chats.map(c => ({
       ...c,
-      messages: c.messages.map(m => m.isGenerating ? { ...m, isGenerating: false, content: m.content || 'Ответ прерван — попробуй ещё раз.' } : m)
+      archived: (c as any).archived || false,
+      messages: c.messages.map(m => m.isGenerating ? { ...m, isGenerating: false, content: m.content || 'Ответ прерван.' } : m)
     }))
-    // Save cleaned chats
-    for (const c of chats) {
-      if (c.messages.some(m => (m as any).wasGenerating)) await saveChat(c)
-    }
     const model = await getSetting<ModelId>('current-model', 'google' as ModelId)
     const draft = await getSetting<string>('global-draft', '')
     set({ chats, currentModel: model || 'google', draft: draft || '' })
+  },
+
+  saveChats: async () => {
+    const { chats } = get()
+    for (const c of chats) await saveChat(c)
   },
 
   createNewChat: () => {

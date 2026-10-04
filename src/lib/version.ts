@@ -1,5 +1,5 @@
-export const APP_VERSION = '4.3.0'
-export const APP_NAME = 'AI-Kayori'
+export const APP_VERSION = '5.0.0'
+export const APP_NAME = 'AI-KAYORI'
 export const APP_BUILD = `build-${Date.now()}`
 export const APP_FULL_NAME = `${APP_NAME}`
 
@@ -11,10 +11,11 @@ export const MODELS = {
     provider: 'Google',
     version: 'Flash',
     color: '#4285F4',
-    description: 'Мультимодальная • видение',
+    description: 'Видит фото, файлы, быстро',
     supportsVision: true,
     supportsFiles: true,
-    icon: 'gemini'
+    icon: 'gemini',
+    capabilities: ['vision', 'code', 'text']
   },
   llama31: {
     id: '@cf/meta/llama-3.1-8b-instruct',
@@ -23,8 +24,9 @@ export const MODELS = {
     provider: 'Meta',
     version: '3.1',
     color: '#8B5CF6',
-    description: 'Русский, быстрый',
-    icon: 'llama'
+    description: 'Русский, дружелюбный, память',
+    icon: 'llama',
+    capabilities: ['text', 'code']
   },
   llama3: {
     id: '@cf/meta/llama-3-8b-instruct',
@@ -33,8 +35,9 @@ export const MODELS = {
     provider: 'Meta',
     version: '3.0',
     color: '#A78BFA',
-    description: 'Классическая',
-    icon: 'llama'
+    description: 'Классика, структура',
+    icon: 'llama',
+    capabilities: ['text']
   },
   mistral: {
     id: '@cf/mistral/mistral-7b-instruct-v0.2',
@@ -43,8 +46,9 @@ export const MODELS = {
     provider: 'Mistral',
     version: 'v0.2',
     color: '#FF6B35',
-    description: 'Короткие задачи',
-    icon: 'mistral'
+    description: 'Коротко, технично',
+    icon: 'mistral',
+    capabilities: ['code', 'text']
   },
   qwen: {
     id: '@cf/qwen/qwen1.5-7b-chat-awq',
@@ -53,15 +57,16 @@ export const MODELS = {
     provider: 'Alibaba',
     version: 'AWQ',
     color: '#7C3AED',
-    description: 'Мультиязычная',
-    icon: 'qwen'
+    description: 'Мультиязычная, примеры',
+    icon: 'qwen',
+    capabilities: ['text', 'code']
   }
 } as const
 
 export type ModelId = keyof typeof MODELS
 
 export const DEVELOPER = {
-  name: 'Kayori Team',
+  name: 'KayoriSAN',
   github: 'https://github.com/kayorissss',
   email: 'dev@kayori.ai'
 }
