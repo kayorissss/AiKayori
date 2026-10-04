@@ -10,19 +10,21 @@ export default defineConfig({
       '@': path.resolve(__dirname, './src'),
     }
   },
+  // @ts-ignore
   server: {
     host: '0.0.0.0',
     port: 5173,
-    strictPort: true
+    strictPort: true,
+    cors: true,
+    hmr: false,
+    headers: { 'X-Frame-Options': 'ALLOWALL' },
+    allowedHosts: true
   },
   preview: {
     host: '0.0.0.0',
     port: 5173,
     strictPort: true,
-    allowedHosts: true,
-    headers: {
-      'X-Frame-Options': 'ALLOWALL'
-    }
+    headers: { 'X-Frame-Options': 'ALLOWALL' }
   },
   build: {
     outDir: 'dist',
