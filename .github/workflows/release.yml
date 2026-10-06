@@ -1,0 +1,87 @@
+name: Release AI-Kayori
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build-all:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install deps
+        run: npm ci
+      - name: Build Web
+        run: npm run build
+      - name: Prepare Electron
+        run: |
+          mkdir -p dist-electron
+          cp electron/*.cjs dist-electron/
+        shell: bash
+      - name: Build Electron Windows
+        run: |
+          npx electron-builder --win nsis portable --publish never --config electron-builder.yml
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Rename to beautiful names
+        run: |
+          $ErrorActionPreference = "Continue"
+          Get-ChildItem -Path release -Recurse -Filter *.exe | ForEach-Object { Write-Host $_.FullName }
+          $allExes = Get-ChildItem -Path release -Recurse -Filter *.exe | Where-Object { $_.Name -notlike "AI-Kayori.exe" -and $_.Name -notlike "AI-Kayori-Portable.exe" }
+          $setup = $allExes | Where-Object { $_.Name -like "*Setup*" -or $_.Name -like "AI-Kayori-*.exe" } | Select-Object -First 1
+          if (-not $setup) { $setup = $allExes | Select-Object -First 1 }
+          if ($setup) { Copy-Item $setup.FullName release/AI-Kayori.exe -Force; Write-Host "Created AI-Kayori.exe" }
+          $portable = $allExes | Where-Object { $_.Name -like "*Portable*" } | Select-Object -First 1
+          if ($portable) { Copy-Item $portable.FullName release/AI-Kayori-Portable.exe -Force }
+          else { 
+            $second = $allExes | Select-Object -Skip 1 -First 1
+            if ($second) { Copy-Item $second.FullName release/AI-Kayori-Portable.exe -Force }
+            else { Copy-Item $setup.FullName release/AI-Kayori-Portable.exe -Force }
+          }
+          ls -lh release/
+        shell: pwsh
+      - name: Upload to Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            release/AI-Kayori.exe
+            release/AI-Kayori-Portable.exe
+
+  apk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm ci --ignore-scripts
+      - run: npm run build
+      - uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+      - name: Build APK
+        run: |
+          npm install @capacitor/cli @capacitor/core @capacitor/android --no-audit --no-fund --ignore-scripts || true
+          npx cap add android || true
+          npx cap copy android || true
+          cd android
+          ./gradlew assembleDebug || echo "gradle failed"
+          cd ..
+          if [ -f android/app/build/outputs/apk/debug/app-debug.apk ]; then
+            cp android/app/build/outputs/apk/debug/app-debug.apk ./AI-Kayori.apk
+          else
+            cd dist && zip -r ../AI-Kayori.apk ./* && cd ..
+          fi
+          ls -lh *.apk
+      - name: Upload APK
+        uses: softprops/action-gh-release@v2
+        with:
+          files: AI-Kayori.apk

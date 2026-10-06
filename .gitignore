@@ -1,0 +1,16 @@
+node_modules
+dist
+dist-electron
+release
+.env
+.env.local
+*.log
+.DS_Store
+android/app/build
+android/.gradle
+Unselected files
+*.apk
+*.exe
+*.dmg
+*.AppImage
+.env
