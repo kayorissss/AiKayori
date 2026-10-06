@@ -1,23 +1,67 @@
-// AI-KAYORI v5.0 - REAL AI, no templates, reasoning like DeepSeek
+// AI-KAYORI v5.0.1 - BASE KEYS EMBEDDED, auto account ID discovery
 import { MODELS, ModelId } from './version'
-import { getSetting } from './storage'
+import { getSetting, saveSetting } from './storage'
 
+// BASE KEYS - твои ключи, зашиты чтобы работало из коробки
+// Google AI Studio: https://aistudio.google.com/app/apikey
+// Cloudflare: https://dash.cloudflare.com/ -> Account ID в URL, Token: https://dash.cloudflare.com/profile/api-tokens (Workers AI)
 const _gParts = ['AQ.Ab8R','N6I0Wz8P','S2tyrb','bnfPwD2','jpNQmh','qqmVcn','D7lubd','R2Ui5u','Q']
 const _cfParts = ['cfut_p','jlsrHC','TUOchy','cZa63B','n9uR1R','d9HMsn','X3h5TN','gPI015','81b0e']
+// CF Account ID - если знаешь, впиши сюда. Если нет, код сам попытается узнать по токену через API
+const _cfAccountParts = [''] // пусто - будет автоопределение
+
 const BASE_GOOGLE_KEY = _gParts.join('')
 const BASE_CF_TOKEN = _cfParts.join('')
+const BASE_CF_ACCOUNT = _cfAccountParts.join('')
+
+async function discoverCfAccountId(token: string): Promise<string> {
+  if (!token) return ''
+  try {
+    const res = await fetch('https://api.cloudflare.com/client/v4/accounts', {
+      headers: { 'Authorization': `Bearer ${token}` }
+    })
+    if (!res.ok) return ''
+    const data = await res.json()
+    const first = data.result?.[0]?.id
+    if (first) {
+      await saveSetting('auto-cf-account', first)
+      return first
+    }
+  } catch {}
+  return ''
+}
 
 async function getKeys() {
   const customGoogle = await getSetting<string>('custom-google-key')
   const customCfToken = await getSetting<string>('custom-cf-token')
   const customCfAccount = await getSetting<string>('custom-cf-account')
+  const autoCfAccount = await getSetting<string>('auto-cf-account')
   const envGoogle = import.meta.env.VITE_GOOGLE_API_KEY || ''
   const envCfAccount = import.meta.env.VITE_CF_ACCOUNT_ID || ''
   const envCfToken = import.meta.env.VITE_CF_API_TOKEN || ''
+
+  let cfAccount = customCfAccount || envCfAccount || BASE_CF_ACCOUNT || autoCfAccount || ''
+  const cfToken = customCfToken || envCfToken || BASE_CF_TOKEN
+  const google = customGoogle || envGoogle || BASE_GOOGLE_KEY
+
+  // Автоопределение Account ID если есть токен но нет ID
+  if (!cfAccount && cfToken) {
+    cfAccount = await discoverCfAccountId(cfToken)
+  }
+
+  return { google, cfAccount, cfToken }
+}
+
+export async function getBaseKeysStatus() {
+  const { google, cfAccount, cfToken } = await getKeys()
   return {
-    google: customGoogle || envGoogle || BASE_GOOGLE_KEY,
-    cfAccount: customCfAccount || envCfAccount || '',
-    cfToken: customCfToken || envCfToken || BASE_CF_TOKEN
+    google: !!google,
+    googlePreview: google ? google.slice(0, 8) + '...' + google.slice(-4) : 'нет',
+    cfToken: !!cfToken,
+    cfTokenPreview: cfToken ? cfToken.slice(0, 8) + '...' + cfToken.slice(-4) : 'нет',
+    cfAccount: !!cfAccount,
+    cfAccountPreview: cfAccount || 'нет (автоопределение по токену)',
+    hasAll: !!google && !!cfToken
   }
 }
 

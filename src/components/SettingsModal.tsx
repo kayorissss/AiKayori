@@ -2,6 +2,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { APP_VERSION, DEVELOPER } from '@/lib/version'
 import { useEffect, useState } from 'react'
 import { getSetting, saveSetting } from '@/lib/storage'
+import { getBaseKeysStatus } from '@/lib/ai'
 
 interface Props { open: boolean; onClose: () => void; theme?: string; onToggleTheme?: () => void }
 
@@ -12,18 +13,20 @@ function InfoIcon() { return <svg width="16" height="16" viewBox="0 0 24 24" fil
 function PuzzleIcon() { return <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2.08C10.5 3.5 9.5 3 7.75 3A5.5 5.5 0 0 0 2.25 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z"/></svg> }
 
 export default function SettingsModal({ open, onClose, theme, onToggleTheme }: Props) {
-  const [activeTab, setActiveTab] = useState<'general' | 'privacy' | 'about' | 'addons' | 'account'>('general')
+  const [activeTab, setActiveTab] = useState<'general' | 'privacy' | 'about' | 'addons' | 'account' | 'keys'>('general')
   const [autoUpdate, setAutoUpdate] = useState(true)
   const [updateStatus, setUpdateStatus] = useState('Нажми чтобы проверить')
   const [hasUpdate, setHasUpdate] = useState(false)
   const [latestVersion, setLatestVersion] = useState('')
   const [otherRepos, setOtherRepos] = useState<any[]>([])
   const [repoReleases, setRepoReleases] = useState<Record<string, any>>({})
+  const [keysStatus, setKeysStatus] = useState<any>(null)
   const isMobileDevice = /Android|iPhone|iPad/i.test(navigator.userAgent)
 
   useEffect(() => {
     if (open) {
       getSetting('auto-update', true).then(v => setAutoUpdate(v as boolean))
+      getBaseKeysStatus().then(setKeysStatus)
       fetch('https://api.github.com/users/kayorissss/repos?per_page=30&sort=updated').then(r => r.json()).then(data => {
         if (Array.isArray(data)) {
           const filtered = data.filter((r: any) => r.name.toLowerCase() !== 'aikayori' && !r.fork).slice(0, 12)
@@ -79,6 +82,7 @@ export default function SettingsModal({ open, onClose, theme, onToggleTheme }: P
                   { id: 'privacy', label: 'Приватность', icon: <ShieldIcon/> },
                   { id: 'about', label: 'О программе', icon: <InfoIcon/> },
                   { id: 'addons', label: 'Дополнения', icon: <PuzzleIcon/> },
+                  { id: 'keys', label: 'Ключи API', icon: <span className="text-[12px]">🔑</span> },
                 ].map(tab => (
                   <button key={tab.id} onClick={() => setActiveTab(tab.id as any)} className={`whitespace-nowrap md:w-full text-left px-3 py-2.5 rounded-[12px] text-[13px] transition flex items-center gap-2 ${activeTab === tab.id ? 'bg-white text-black' : 'hover:bg-white/[0.06] text-[#888] hover:text-[#DDD]'}`} style={{ fontWeight: activeTab === tab.id ? 700 : 600 }}>
                     {tab.icon} {tab.label}
@@ -178,6 +182,47 @@ export default function SettingsModal({ open, onClose, theme, onToggleTheme }: P
                       <div className="flex items-center gap-3">
                         <div className="w-10 h-10 rounded-full bg-white text-black flex items-center justify-center font-bold">K</div>
                         <div><div className="font-bold">{DEVELOPER.name}</div><div className="text-[11px] text-[#666] font-mono">{DEVELOPER.github}</div></div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {activeTab === 'keys' && (
+                  <div className="space-y-5">
+                    <h2 className="text-[20px] font-bold" style={{ fontWeight: 700 }}>API Ключи — Базовые встроены</h2>
+                    <p className="text-[12px] text-[#666]">Базовые ключи зашиты в код чтобы работало из коробки. Ссылки где взять свои:</p>
+                    <div className="grid gap-3">
+                      <a href="https://aistudio.google.com/app/apikey" target="_blank" className="bg-[#151515] border border-white/[0.06] rounded-[14px] p-4 flex justify-between items-center hover:border-white/[0.10]">
+                        <div><div className="text-[13px] font-bold">Google AI Studio — Gemini API</div><div className="text-[11px] text-[#666] mt-1">https://aistudio.google.com/app/apikey</div></div>
+                        <div className="text-[10px] font-mono px-2 py-1 rounded-full bg-[#22C55E]/20 text-[#22C55E] border border-[#22C55E]/20">{keysStatus?.google ? 'встроен' : 'нет'}</div>
+                      </a>
+                      <a href="https://dash.cloudflare.com/" target="_blank" className="bg-[#151515] border border-white/[0.06] rounded-[14px] p-4 flex justify-between items-center hover:border-white/[0.10]">
+                        <div><div className="text-[13px] font-bold">Cloudflare — Account ID</div><div className="text-[11px] text-[#666] mt-1">https://dash.cloudflare.com/ → скопируй ID из URL</div></div>
+                        <div className="text-[10px] font-mono px-2 py-1 rounded-full bg-[#22C55E]/20 text-[#22C55E] border border-[#22C55E]/20">{keysStatus?.cfAccount ? 'есть' : 'авто'}</div>
+                      </a>
+                      <a href="https://dash.cloudflare.com/profile/api-tokens" target="_blank" className="bg-[#151515] border border-white/[0.06] rounded-[14px] p-4 flex justify-between items-center hover:border-white/[0.10]">
+                        <div><div className="text-[13px] font-bold">Cloudflare — API Token (Workers AI)</div><div className="text-[11px] text-[#666] mt-1">https://dash.cloudflare.com/profile/api-tokens → Create Token → Workers AI</div></div>
+                        <div className="text-[10px] font-mono px-2 py-1 rounded-full bg-[#22C55E]/20 text-[#22C55E] border border-[#22C55E]/20">{keysStatus?.cfToken ? 'встроен' : 'нет'}</div>
+                      </a>
+                    </div>
+                    {keysStatus && (
+                      <div className="bg-[#0A0A0A] border border-white/[0.06] rounded-[14px] p-4 font-mono text-[11px] space-y-1">
+                        <div className="text-[#666]">Статус базовых:</div>
+                        <div>Google: <span className="text-white">{keysStatus.googlePreview}</span> {keysStatus.google ? '✅' : '❌'}</div>
+                        <div>CF Token: <span className="text-white">{keysStatus.cfTokenPreview}</span> {keysStatus.cfToken ? '✅' : '❌'}</div>
+                        <div>CF Account: <span className="text-white">{keysStatus.cfAccountPreview}</span> {keysStatus.cfAccount ? '✅' : '⚠️ авто'}</div>
+                        <div className="pt-2 text-[#666]">Кастомные ключи можно задать через localStorage или .env — они приоритетнее базовых.</div>
+                      </div>
+                    )}
+                    <div className="bg-[#151515] border border-white/[0.06] rounded-[16px] p-5">
+                      <div className="text-[13px] font-bold mb-2">Как встроить свои</div>
+                      <div className="text-[11px] text-[#888] leading-[1.6] font-mono">
+                        VITE_GOOGLE_API_KEY=...<br/>
+                        VITE_CF_ACCOUNT_ID=...<br/>
+                        VITE_CF_API_TOKEN=...<br/><br/>
+                        Или в коде: saveSetting('custom-google-key', '...')<br/>
+                        saveSetting('custom-cf-account', '...')<br/>
+                        saveSetting('custom-cf-token', '...')
                       </div>
                     </div>
                   </div>

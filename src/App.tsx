@@ -86,14 +86,14 @@ export default function App() {
               <div className="flex items-baseline gap-[1px]">
                 <span className="text-[20px] font-bold tracking-tight" style={{ fontFamily: 'Unbounded, sans-serif' }}>AI</span>
                 <span className="text-[20px] font-medium tracking-tight text-[#777]" style={{ fontFamily: 'Unbounded, sans-serif' }}>KAYORI</span>
-                <span className="ml-2 text-[10px] font-mono px-2 py-0.5 rounded-full bg-white/[0.08] border border-white/[0.06]">v5.0.0</span>
+                <span className="ml-2 text-[10px] font-mono px-2 py-0.5 rounded-full bg-white/[0.08] border border-white/[0.06]">v5.0.1</span>
               </div>
             </motion.div>
           </motion.div>
         )}
       </AnimatePresence>
 
-      {!isMobile && <TitleBar theme={theme} version="v5.0.0" />}
+      {!isMobile && <TitleBar theme={theme} version="v5.0.1" />}
 
       <div className={`flex flex-1 overflow-hidden min-h-0 relative z-10 ${isMobile ? 'pt-0' : 'pt-[48px]'}`}>
         <AnimatePresence>
@@ -129,7 +129,7 @@ export default function App() {
               <div className="flex items-center gap-2">
                 <div className="w-7 h-7 rounded-[8px] overflow-hidden bg-white/[0.06] border border-white/[0.08]"><img src="./logo-kayori.png" alt="k" className="w-full h-full object-cover" /></div>
                 <span className="text-[14px] font-bold" style={{ fontFamily: 'Unbounded, sans-serif' }}>AI<span className="text-[#777]">KAYORI</span></span>
-                <span className="text-[9px] font-mono px-1.5 py-0.5 rounded-full bg-white/[0.08]">v5.0.0</span>
+                <span className="text-[9px] font-mono px-1.5 py-0.5 rounded-full bg-white/[0.08]">v5.0.1</span>
               </div>
               <div className="ml-auto flex gap-1.5">
                 <button onClick={() => setShowFiles(!showFiles)} className={`w-8 h-8 rounded-full border flex items-center justify-center ${showFiles ? 'bg-white text-black border-white' : 'bg-white/[0.06] border-white/[0.06] text-[#666]'}`} title="Файлы">
