@@ -1,0 +1,23 @@
+appId: com.kayori.ai
+productName: AI-Kayori
+directories:
+  buildResources: public
+  output: release
+files:
+  - dist/**/*
+  - dist-electron/**/*
+  - public/**/*
+  - "!**/*.map"
+win:
+  icon: public/icons/icon.png
+  target:
+    - nsis
+    - portable
+  artifactName: "AI-Kayori-${version}.${ext}"
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  artifactName: "AI-Kayori-${version}.${ext}"
+portable:
+  artifactName: "AI-Kayori-Portable-${version}.${ext}"

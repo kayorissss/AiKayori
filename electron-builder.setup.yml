@@ -1,0 +1,18 @@
+appId: com.kayori.ai
+productName: AI-Kayori
+directories:
+  buildResources: public
+  output: release/setup
+files:
+  - dist/**/*
+  - dist-electron/**/*
+  - public/**/*
+win:
+  icon: public/icons/icon.png
+  target: [nsis]
+  artifactName: "AI-Kayori-${version}.${ext}"
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  artifactName: "AI-Kayori-${version}.${ext}"

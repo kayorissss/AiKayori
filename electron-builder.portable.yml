@@ -1,0 +1,13 @@
+appId: com.kayori.ai
+productName: AI-Kayori
+directories:
+  buildResources: public
+  output: release/portable
+files:
+  - dist/**/*
+  - dist-electron/**/*
+  - public/**/*
+win:
+  icon: public/icons/icon.png
+  target: [portable]
+  artifactName: "AI-Kayori-Portable-${version}.${ext}"
