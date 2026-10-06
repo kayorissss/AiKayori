@@ -1,0 +1,51 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  * { @apply border-white/[0.06]; }
+  body {
+    @apply bg-[#080808] text-white antialiased overflow-hidden;
+    font-family: 'Gotham', 'Manrope', system-ui, sans-serif;
+    font-weight: 600;
+  }
+  h1, h2, h3 { font-family: 'Gotham', sans-serif; font-weight: 700; }
+  b, strong { font-weight: 700; }
+}
+
+.drag-region { -webkit-app-region: drag; }
+.no-drag { -webkit-app-region: no-drag; }
+
+::-webkit-scrollbar { width: 4px; height: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #222; border-radius: 10px; }
+::-webkit-scrollbar-thumb:hover { background: #333; }
+
+.markdown p { @apply mb-3 last:mb-0 leading-[1.7] text-[14px]; font-weight: 600; }
+.markdown code { @apply bg-white/[0.06] border border-white/[0.08] px-1.5 py-0.5 rounded-md text-[12px] font-mono; }
+.markdown pre { @apply bg-[#0E0E0E] border border-[#222] rounded-[10px] p-3 my-3 overflow-x-auto; }
+.markdown pre code { @apply bg-transparent border-0 p-0 text-[12px]; }
+.markdown ul { @apply list-disc pl-5 mb-2 space-y-1; }
+.markdown ol { @apply list-decimal pl-5 mb-2 space-y-1; }
+.markdown a { @apply text-white underline decoration-white/20 hover:decoration-white/60; }
+.markdown h1, .markdown h2, .markdown h3 { @apply font-bold mt-4 mb-2; }
+.markdown strong { @apply font-bold text-white; }
+
+body, .select-text { user-select: text; }
+button, .no-select { user-select: none; }
+
+*:focus { outline: none !important; }
+*:focus-visible { outline: none !important; }
+textarea:focus, input:focus { outline: none !important; box-shadow: none !important; }
+::selection { background: #3A3A3A; color: #fff; }
+::-moz-selection { background: #3A3A3A; color: #fff; }
+
+@keyframes typing { 0%,60%,100% { opacity:0.3 } 30% { opacity:1 } }
+.scrollbar-thin { scrollbar-width: thin; }
+
+/* Premium spring feel */
+button { transition: transform 0.15s cubic-bezier(0.34,1.56,0.64,1), background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease, opacity 0.2s ease; }
+button:active { transform: scale(0.96); }
+
+/* File drag */
+.drag-over { background: rgba(255,255,255,0.04) !important; border-color: rgba(255,255,255,0.15) !important; }

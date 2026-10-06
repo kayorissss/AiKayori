@@ -1,0 +1,244 @@
+import { useChatStore } from '@/store/chatStore'
+import { motion, AnimatePresence } from 'framer-motion'
+import { useMemo, useState, useEffect } from 'react'
+
+interface Props {
+  onOpenSettings: () => void
+  collapsed: boolean
+  onToggle: () => void
+  isMobile?: boolean
+  theme?: string
+}
+
+function stripMd(t: string): string {
+  return t.replace(/\*\*(.*?)\*\*/g, '$1').replace(/\*(.*?)\*/g, '$1').replace(/`([^`]+)`/g, '$1').replace(/\[([^\]]+)\]\([^)]+\)/g, '$1').trim()
+}
+
+function groupChatsByDate(chats: any[]) {
+  const now = new Date()
+  const todayStr = now.toDateString()
+  const yest = new Date(now); yest.setDate(now.getDate()-1)
+  const yestStr = yest.toDateString()
+  const groups: { label: string, chats: any[] }[] = []
+  const map: Record<string, any[]> = {}
+  const order: string[] = []
+  const fmt = (d: Date) => d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', year: d.getFullYear() !== now.getFullYear() ? 'numeric' : undefined })
+  chats.forEach(chat => {
+    if (chat.archived) return
+    const d = new Date(chat.updatedAt)
+    const ds = d.toDateString()
+    let label: string
+    if (ds === todayStr) label = 'Сегодня'
+    else if (ds === yestStr) label = 'Вчера'
+    else label = fmt(d)
+    if (!map[label]) { map[label] = []; order.push(label) }
+    map[label].push(chat)
+  })
+  const sortedOrder = order.sort((a,b) => {
+    if (a === 'Сегодня') return -1
+    if (b === 'Сегодня') return 1
+    if (a === 'Вчера') return -1
+    if (b === 'Вчера') return 1
+    return 0
+  })
+  sortedOrder.forEach(l => groups.push({ label: l, chats: map[l] }))
+  return groups
+}
+
+// NEW GEAR ICON - modern, minimal, not ugly
+function GearIcon({ size=18 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z"/>
+      <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 9 15a1.65 1.65 0 0 0-1-1.51V12.5a1.65 1.65 0 0 0 1-1.51V9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 13.5 4.5V4a2 2 0 0 1 4 0v.5a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19 9v1.5a1.65 1.65 0 0 0-1 1.51V13.5a1.65 1.65 0 0 0 1 1.5z"/>
+    </svg>
+  )
+}
+
+function LogoCat({ size=28 }: { size?: number }) {
+  return (
+    <div className="rounded-[12px] overflow-hidden bg-white/[0.06] border border-white/[0.08] flex items-center justify-center" style={{ width: size, height: size }}>
+      <img src="./logo-kayori.png" alt="k" className="w-full h-full object-cover" />
+    </div>
+  )
+}
+
+export default function Sidebar({ onOpenSettings, collapsed, onToggle, isMobile = false }: Props) {
+  const { chats, activeChatId, setActiveChat, createNewChat, deleteChat } = useChatStore()
+  const { searchQuery, setSearchQuery } = useChatStore()
+  const [confirmId, setConfirmId] = useState<string | null>(null)
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const [editTitle, setEditTitle] = useState('')
+  const [menuId, setMenuId] = useState<string | null>(null)
+  const [menuPos, setMenuPos] = useState<{ x: number, y: number } | null>(null)
+  const [showArchive, setShowArchive] = useState(false)
+
+  const filtered = useMemo(() => {
+    let list = showArchive ? chats.filter(c => c.archived) : chats.filter(c => !c.archived)
+    if (!searchQuery) return list
+    const q = searchQuery.toLowerCase()
+    return list.filter(c => c.title.toLowerCase().includes(q))
+  }, [chats, searchQuery, showArchive])
+  const grouped = useMemo(() => showArchive ? [{ label: 'Архив', chats: filtered }] : groupChatsByDate(filtered), [filtered, showArchive])
+  const archivedCount = chats.filter(c => c.archived).length
+
+  const handleRename = (chat: any) => { setEditingId(chat.id); setEditTitle(chat.title); setMenuId(null) }
+  const saveRename = () => {
+    if (editingId && editTitle.trim()) {
+      const { chats } = useChatStore.getState()
+      const updated = chats.map(c => c.id === editingId ? { ...c, title: editTitle.trim() } : c)
+      // @ts-ignore
+      useChatStore.setState({ chats: updated })
+      useChatStore.getState().saveChats()
+    }
+    setEditingId(null)
+  }
+
+  useEffect(() => {
+    const onClick = () => setMenuId(null)
+    if (menuId) { document.addEventListener('click', onClick); return () => document.removeEventListener('click', onClick) }
+  }, [menuId])
+
+  if (collapsed && !isMobile) {
+    return (
+      <motion.div
+        initial={false}
+        animate={{ width: 72 }}
+        transition={{ type: 'spring', stiffness: 400, damping: 35 }}
+        className="bg-[#0A0A0A] border-r border-white/[0.06] flex flex-col items-center py-4 gap-3 shrink-0 overflow-hidden"
+        style={{ width: '72px' } as any}
+      >
+        <div className="w-10 h-10 rounded-[14px] overflow-hidden border border-white/[0.08] bg-white/[0.04] flex items-center justify-center">
+          <img src="./logo-kayori.png" alt="k" className="w-full h-full object-cover" />
+        </div>
+        <motion.button whileTap={{ scale: 0.9 }} whileHover={{ scale: 1.05 }} onClick={onToggle} className="w-10 h-10 rounded-full bg-white/[0.06] border border-white/[0.08] flex items-center justify-center hover:bg-white/[0.10] transition backdrop-blur">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#888" strokeWidth="2" strokeLinecap="round"><path d="M9 18l6-6-6-6"/></svg>
+        </motion.button>
+        <motion.button whileTap={{ scale: 0.9 }} whileHover={{ scale: 1.05 }} onClick={() => createNewChat()} className="w-10 h-10 rounded-full bg-white text-black flex items-center justify-center shadow-[0_4px_12px_rgba(255,255,255,0.15)]">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M12 5v14M5 12h14"/></svg>
+        </motion.button>
+        <div className="w-8 h-[1px] bg-white/[0.06] my-1" />
+        <div className="flex-1 overflow-y-auto w-full px-2 space-y-2 py-2 scrollbar-thin">
+          {chats.filter(c=>!c.archived).slice(0,24).map((chat:any,i:number)=>(
+            <motion.button key={chat.id} whileTap={{ scale: 0.92 }} whileHover={{ scale: 1.05 }} onClick={()=>setActiveChat(chat.id)} className={`w-full h-10 rounded-full flex items-center justify-center text-[12px] font-bold border transition shadow-sm ${activeChatId===chat.id ? 'bg-white text-black border-white shadow-[0_2px_8px_rgba(255,255,255,0.2)]' : 'bg-white/[0.05] border-white/[0.08] text-[#666] hover:text-white hover:bg-white/[0.10] hover:border-white/[0.12]'}`}>{i+1}</motion.button>
+          ))}
+        </div>
+        <motion.button whileTap={{ scale: 0.9 }} whileHover={{ scale: 1.05 }} onClick={onOpenSettings} className="w-10 h-10 rounded-full bg-[#151515] border border-white/[0.08] flex items-center justify-center hover:bg-[#1E1E1E] text-[#888] hover:text-white transition shadow-[0_2px_8px_rgba(0,0,0,0.3)]" title="Настройки">
+          <GearIcon size={18}/>
+        </motion.button>
+      </motion.div>
+    )
+  }
+
+  return (
+    <motion.div
+      initial={isMobile ? { x: -320 } : false}
+      animate={isMobile ? { x: 0, opacity: 1 } : { opacity: 1, x: 0 }}
+      exit={isMobile ? { x: -320 } : undefined}
+      transition={{ type: 'spring', stiffness: 380, damping: 32 }}
+      className="bg-[#0A0A0A] border-r border-white/[0.06] flex flex-col shrink-0 overflow-hidden h-full"
+      style={{ width: isMobile ? 320 : 'var(--sidebar-width, 320px)' }}
+    >
+      <div className="p-4 flex items-center gap-2.5 shrink-0">
+        <div className="w-9 h-9 rounded-[12px] overflow-hidden border border-white/[0.08] bg-white/[0.04] flex items-center justify-center shrink-0">
+          <img src="./logo-kayori.png" alt="k" className="w-full h-full object-cover" />
+        </div>
+        <div className="flex-1 relative">
+          <input value={searchQuery} onChange={e => setSearchQuery(e.target.value)} placeholder="Поиск чатов..." className="w-full bg-white/[0.05] border border-white/[0.08] rounded-full py-2.5 pl-10 pr-10 text-[13px] placeholder:text-[#555] focus:outline-none focus:border-white/[0.14] focus:bg-white/[0.08] transition" style={{ fontWeight: 600 }} />
+          <svg className="absolute left-3.5 top-1/2 -translate-y-1/2" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#555" strokeWidth="2" strokeLinecap="round"><circle cx="11" cy="11" r="6"/><path d="m21 21-4.3-4.3"/></svg>
+          {searchQuery && <button onClick={() => setSearchQuery('')} className="absolute right-2.5 top-1/2 -translate-y-1/2 w-6 h-6 rounded-full bg-white/[0.08] flex items-center justify-center text-[10px] text-[#888] hover:text-white">×</button>}
+        </div>
+        <motion.button whileTap={{ scale: 0.92 }} onClick={onToggle} className="w-9 h-9 rounded-full bg-white/[0.05] border border-white/[0.06] flex items-center justify-center hover:bg-white/[0.08] transition shrink-0" title="Скрыть">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#888" strokeWidth="2" strokeLinecap="round"><path d="M15 18l-6-6 6-6"/></svg>
+        </motion.button>
+      </div>
+
+      <div className="px-4 pb-3 shrink-0 flex gap-2">
+        <motion.button whileTap={{ scale: 0.97 }} whileHover={{ scale: 1.01 }} onClick={() => { createNewChat(); if (isMobile) setTimeout(() => onToggle(), 100) }} className="flex-1 bg-white text-black rounded-full py-3.5 text-[13px] font-bold flex items-center justify-center gap-2 hover:bg-white/90 transition shadow-[0_4px_14px_rgba(255,255,255,0.12)]" style={{ fontWeight: 700 }}>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M12 5v14M5 12h14"/></svg> Новый чат
+        </motion.button>
+        {archivedCount > 0 && (
+          <motion.button whileTap={{ scale: 0.95 }} onClick={() => setShowArchive(!showArchive)} className={`w-[44px] rounded-full border flex items-center justify-center transition ${showArchive ? 'bg-white text-black border-white' : 'bg-white/[0.06] border-white/[0.06] text-[#666] hover:text-white hover:bg-white/[0.10]'}`} title="Архив">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/></svg>
+          </motion.button>
+        )}
+      </div>
+
+      {showArchive && (
+        <div className="px-4 pb-2">
+          <div className="flex items-center justify-between text-[11px] font-bold uppercase tracking-widest text-[#666] px-2">
+            <span>Архив • {archivedCount}</span>
+            <button onClick={() => setShowArchive(false)} className="text-[10px] normal-case font-medium hover:text-white">← Назад</button>
+          </div>
+        </div>
+      )}
+
+      <div className="flex-1 overflow-y-auto px-3 py-2 space-y-6 min-h-0 scrollbar-thin">
+        {grouped.length === 0 ? (
+          <div className="px-3 py-24 text-center"><div className="w-10 h-10 mx-auto rounded-[14px] bg-white/[0.04] border border-white/[0.06] flex items-center justify-center mb-2"><span className="text-[#333]">—</span></div><div className="text-[11px] text-[#555] font-mono">{showArchive ? 'архив пуст' : 'нет чатов'}</div></div>
+        ) : grouped.map((group) => (
+          <div key={group.label}>
+            <div className="text-[10px] font-mono text-[#444] uppercase tracking-[0.14em] px-3 py-2 font-bold">{group.label}</div>
+            <div className="space-y-1.5">
+              {group.chats.map((chat: any) => {
+                const globalIdx = chats.findIndex(c => c.id === chat.id) + 1
+                const isActive = activeChatId === chat.id
+                const isEditing = editingId === chat.id
+                const lastMsg = chat.messages[chat.messages.length-1]
+                const preview = lastMsg ? stripMd(lastMsg.content) : 'пусто'
+                return (
+                  <motion.div key={chat.id} whileTap={{ scale: 0.98 }} initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} transition={{ type: 'spring', stiffness: 400, damping: 30 }} className={`group relative flex items-center gap-3 px-3.5 py-3 rounded-[16px] cursor-pointer border transition-all ${isActive ? 'bg-white/[0.08] border-white/[0.12] shadow-[0_2px_12px_rgba(255,255,255,0.06)]' : 'border-transparent hover:bg-white/[0.05] hover:border-white/[0.06]'}`}>
+                    <div className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 text-[11px] font-bold border transition ${isActive ? 'bg-white text-black border-white shadow-[0_2px_6px_rgba(255,255,255,0.15)]' : 'bg-white/[0.05] border-white/[0.08] text-[#666] group-hover:text-[#AAA] group-hover:bg-white/[0.08]'}`} style={{ fontWeight: 700 }}>{globalIdx}</div>
+                    <div className="flex-1 min-w-0" onClick={() => { if (!isEditing) { setActiveChat(chat.id); if (isMobile) setTimeout(() => onToggle(), 100) } }}>
+                      {isEditing ? <input value={editTitle} onChange={e => setEditTitle(e.target.value)} onBlur={saveRename} onKeyDown={e => e.key === 'Enter' && saveRename()} autoFocus className="w-full bg-black/60 border border-white/15 rounded-full px-3 py-1 text-[13px] outline-none" /> : <>
+                        <div className={`text-[13px] truncate ${isActive ? 'text-white' : 'text-[#AAA] group-hover:text-[#DDD]'}`} style={{ fontWeight: 600 }}>{stripMd(chat.title)}</div>
+                        <div className="text-[11px] text-[#555] truncate mt-0.5 pr-2">{preview}</div>
+                      </>}
+                    </div>
+                    <button onClick={e => { e.stopPropagation(); const rect = (e.currentTarget as HTMLElement).getBoundingClientRect(); setMenuPos({ x: rect.right, y: rect.top }); setMenuId(menuId === chat.id ? null : chat.id) }} className="w-7 h-7 rounded-full bg-white/[0.06] border border-white/[0.06] flex items-center justify-center hover:bg-white/[0.12] text-[#666] hover:text-white opacity-0 group-hover:opacity-100 transition">⋯</button>
+                  </motion.div>
+                )
+              })}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {menuId && menuPos && (
+        <div className="fixed w-[190px] bg-[#161616] border border-white/[0.10] rounded-[14px] shadow-[0_16px_40px_rgba(0,0,0,0.6)] overflow-hidden z-[200] p-1" style={{ left: menuPos.x - 190, top: menuPos.y + 32 }}>
+          <button onClick={() => { const chat = chats.find(c => c.id === menuId); if (chat) handleRename(chat) }} className="w-full text-left px-3 py-2.5 rounded-[10px] text-[12px] hover:bg-white/[0.06] flex items-center gap-2">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg> Переименовать
+          </button>
+          <button onClick={() => { const { chats } = useChatStore.getState(); const updated = chats.map(c => c.id === menuId ? { ...c, archived: !c.archived } : c); // @ts-ignore
+            useChatStore.setState({ chats: updated }); useChatStore.getState().saveChats(); setMenuId(null) }} className="w-full text-left px-3 py-2.5 rounded-[10px] text-[12px] hover:bg-white/[0.06] flex items-center gap-2">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/></svg> {chats.find(c => c.id === menuId)?.archived ? 'Вернуть' : 'В архив'}
+          </button>
+          <div className="h-[1px] bg-white/[0.06] my-1" />
+          <button onClick={() => { setMenuId(null); setConfirmId(menuId) }} className="w-full text-left px-3 py-2.5 rounded-[10px] text-[12px] hover:bg-[#FF4444]/10 text-[#FF6666] flex items-center gap-2"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg> Удалить</button>
+        </div>
+      )}
+
+      <AnimatePresence>
+        {confirmId && (
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="absolute inset-0 z-50 bg-black/60 backdrop-blur-[12px] flex items-center justify-center p-4">
+            <motion.div initial={{ scale: 0.92, y: 12 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.92, y: 12 }} transition={{ type: 'spring', stiffness: 400, damping: 30 }} className="bg-[#1A1A1A] border border-white/[0.08] rounded-[20px] p-6 w-full max-w-[300px] shadow-[0_16px_40px_rgba(0,0,0,0.6)]">
+              <div className="text-[15px] font-bold" style={{ fontWeight: 700 }}>Удалить чат?</div>
+              <div className="text-[12px] text-[#888] mt-2">История будет удалена безвозвратно.</div>
+              <div className="flex gap-2.5 mt-6"><button onClick={() => setConfirmId(null)} className="flex-1 bg-white/[0.06] border border-white/[0.08] rounded-full py-2.5 text-[13px] hover:bg-white/[0.08] transition">Отмена</button><button onClick={() => { deleteChat(confirmId); setConfirmId(null) }} className="flex-1 bg-white text-black rounded-full py-2.5 text-[13px] font-bold hover:bg-white/90 transition">Удалить</button></div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <div className="p-3 border-t border-white/[0.04] shrink-0">
+        <motion.button whileTap={{ scale: 0.97 }} whileHover={{ scale: 1.01, backgroundColor: 'rgba(255,255,255,0.06)' }} onClick={onOpenSettings} className="w-full flex items-center gap-3 px-3.5 py-3 rounded-[16px] border border-transparent hover:border-white/[0.06] transition text-[13px] group">
+          <div className="w-9 h-9 rounded-full bg-[#151515] border border-white/[0.08] flex items-center justify-center group-hover:bg-[#1E1E1E] transition text-[#888] group-hover:text-white shadow-[0_2px_8px_rgba(0,0,0,0.2)]">
+            <GearIcon size={18}/>
+          </div>
+          <span className="font-semibold text-[#999] group-hover:text-[#DDD]">Настройки</span>
+          <span className="ml-auto text-[10px] font-mono px-2 py-0.5 rounded-full bg-white/[0.06] border border-white/[0.06] text-[#666]">v5</span>
+        </motion.button>
+      </div>
+    </motion.div>
+  )
+}
